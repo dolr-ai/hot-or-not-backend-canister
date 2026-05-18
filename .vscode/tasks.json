@@ -26,6 +26,18 @@
       "problemMatcher": []
     },
     {
+      "label": "Mainnet: Execute canister calls",
+      "detail": "Run execute-canister-calls.sh as the actions identity against mainnet (edit the script to add/change operations)",
+      "type": "shell",
+      "command": "bash scripts/execute-canister-calls.sh",
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      },
+      "problemMatcher": []
+    },
+    {
       "label": "Release: platform_orchestrator only",
       "detail": "Build and submit SNS upgrade proposal for platform_orchestrator",
       "type": "shell",

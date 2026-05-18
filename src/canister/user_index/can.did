@@ -48,6 +48,10 @@ type HttpResponse = record {
   headers : vec record { text; text };
   status_code : nat16;
 };
+type IndividualCanisterDetails = record {
+  controllers : vec principal;
+  cycle_balance : nat;
+};
 type IndividualUserCreatorDaoEntry = record {
   deployed_canisters : vec principal;
   individual_profile_id : principal;
@@ -98,11 +102,12 @@ type Result_3 = variant {
   Ok : vec record { principal; IndividualUserCreatorDaoEntry };
   Err : text;
 };
-type Result_4 = variant {
+type Result_4 = variant { Ok : IndividualCanisterDetails; Err : text };
+type Result_5 = variant {
   Ok : record { CanisterStatusResponse };
   Err : record { RejectionCode; text };
 };
-type Result_5 = variant { Ok; Err : SetUniqueUsernameError };
+type Result_6 = variant { Ok; Err : SetUniqueUsernameError };
 type SetUniqueUsernameError = variant {
   UsernameAlreadyTaken;
   SendingCanisterDoesNotMatchUserCanisterId;
@@ -154,6 +159,7 @@ service : (UserIndexInitArgs) -> {
     ) query;
   get_index_details_is_user_name_taken : (text) -> (bool) query;
   get_index_details_last_upgrade_status : () -> (UpgradeStatus) query;
+  get_individual_canister_details : (principal) -> (Result_4);
   get_last_broadcast_call_status : () -> (BroadcastCallStatus) query;
   get_list_of_available_canisters : () -> (vec principal) query;
   get_recycle_status : () -> (RecycleStatus) query;
@@ -169,7 +175,7 @@ service : (UserIndexInitArgs) -> {
     ) query;
   get_user_canister_incl_avail_list : () -> (vec principal) query;
   get_user_canister_list : () -> (vec principal) query;
-  get_user_canister_status : (principal) -> (Result_4);
+  get_user_canister_status : (principal) -> (Result_5);
   get_user_id_and_canister_list : () -> (
       vec record { principal; principal },
     ) query;
@@ -212,7 +218,7 @@ service : (UserIndexInitArgs) -> {
   update_index_with_unique_user_name_corresponding_to_user_principal_id : (
       text,
       principal,
-    ) -> (Result_5);
+    ) -> (Result_6);
   update_pd_onboarding_reward_for_all_individual_users : (nat) -> (Result_1);
   update_profile_owner_for_individual_canisters : () -> ();
   update_restart_timers_hon_game : () -> (text);

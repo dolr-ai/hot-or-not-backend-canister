@@ -84,6 +84,7 @@ type WasmType = variant {
 service : (PlatformOrchestratorInitArgs) -> {
   add_principal_as_global_admin : (principal) -> ();
   clear_snapshot : () -> ();
+  collect_controlled_canisters : () -> (nat64);
   collect_creator_dao_stats_in_the_network : () -> ();
   delete_all_sns_creator_token_in_the_network : () -> ();
   delete_all_sns_creator_token_of_an_individual_canister : (principal) -> (
@@ -97,6 +98,8 @@ service : (PlatformOrchestratorInitArgs) -> {
   get_all_available_subnet_orchestrators : () -> (vec principal) query;
   get_all_global_admins : () -> (vec principal) query;
   get_all_subnet_orchestrators : () -> (vec principal) query;
+  get_controlled_canisters : (nat64, nat64) -> (vec principal) query;
+  get_controlled_canisters_count : () -> (nat64) query;
   get_creator_dao_stats : () -> (CreatorDaoTokenStats) query;
   get_global_known_principal : (KnownPrincipalType) -> (principal) query;
   get_subnet_known_principal : (principal, KnownPrincipalType) -> (
@@ -106,6 +109,7 @@ service : (PlatformOrchestratorInitArgs) -> {
   get_subnets_upgrade_status_report : () -> (SubnetUpgradeReport) query;
   get_version : () -> (text) query;
   http_request : (HttpRequest) -> (HttpResponse) query;
+  is_controlled_canister : (principal) -> (bool) query;
   load_snapshot : () -> ();
   make_individual_canister_logs_private : (principal) -> (Result);
   make_individual_canister_logs_public : (principal) -> (Result);
