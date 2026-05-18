@@ -52,6 +52,8 @@ pub struct CanisterData {
     pub state_guard: StateGuard,
     #[serde(default)]
     pub creator_dao_stats: CreatorDaoTokenStats,
+    #[serde(default)]
+    pub controlled_canisters: HashSet<Principal>,
 }
 
 fn _default_wasms() -> StableBTreeMap<WasmType, CanisterWasm, Memory> {
@@ -81,6 +83,7 @@ impl Default for CanisterData {
             subnets_upgrade_report: SubnetUpgradeReport::default(),
             state_guard: StateGuard::default(),
             creator_dao_stats: CreatorDaoTokenStats::default(),
+            controlled_canisters: Default::default(),
         }
     }
 }

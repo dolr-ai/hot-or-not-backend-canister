@@ -38,6 +38,7 @@ pub mod delete_all_sns_creator_token_in_the_network;
 pub mod delete_all_sns_creator_token_of_an_individual_canister;
 pub mod fixup_individual_canisters_mappings;
 pub mod get_bulk_operation_status;
+pub mod get_individual_canister_details;
 pub mod get_last_broadcast_call_status;
 pub mod get_subnet_available_capacity;
 pub mod get_subnet_backup_capacity;

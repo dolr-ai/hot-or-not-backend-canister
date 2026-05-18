@@ -22,7 +22,7 @@
 set -euo pipefail
 
 # ── Version counter (auto-incremented on each successful run) ──────────────────
-CURRENT_VERSION=2
+CURRENT_VERSION=3
 # ──────────────────────────────────────────────────────────────────────────────
 
 NEURON_ID="4de673e9cd7a1339afea6523a5f227d25e9d739ff52635ac86dbdb0447ae106a"
