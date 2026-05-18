@@ -31,6 +31,11 @@ trap restore_identity EXIT
 dfx identity import --storage-mode=plaintext actions "$IDENTITY_FILE" --force
 dfx identity use actions
 
+# Suppress dfx's "plaintext identity on mainnet" warning — we accept the risk
+# since this identity is only used for governance proposals and canister calls,
+# not for holding cycles or ICP balances.
+export DFX_WARNING=-mainnet_plaintext_identity
+
 # ── Operations ────────────────────────────────────────────────────────────────
 
 echo "==> Calling collect_controlled_canisters on platform_orchestrator (${PLATFORM_ORCHESTRATOR_ID})..."
