@@ -22,7 +22,7 @@
 set -euo pipefail
 
 # ── Version counter (auto-incremented on each successful run) ──────────────────
-CURRENT_VERSION=1
+CURRENT_VERSION=2
 # ──────────────────────────────────────────────────────────────────────────────
 
 NEURON_ID="4de673e9cd7a1339afea6523a5f227d25e9d739ff52635ac86dbdb0447ae106a"
@@ -79,6 +79,11 @@ for canister in platform_orchestrator $SUBNET_CANISTERS_TO_BUILD; do
   hash=$(sha256sum < ".dfx/ic/canisters/${canister}/${canister}.wasm.gz")
   echo "    ${canister} module hash: ${hash}"
 done
+
+# Regenerate can.did files from the freshly-built wasm so the repo stays in sync.
+# generate-candid.sh accepts multiple canister names as arguments.
+echo "==> Regenerating Candid interfaces..."
+bash scripts/generate-candid.sh platform_orchestrator $SUBNET_CANISTERS_TO_BUILD
 
 # Download quill (macOS) if not present
 if [[ ! -x ./quill ]]; then

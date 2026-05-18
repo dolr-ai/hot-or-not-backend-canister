@@ -2,6 +2,18 @@
   "version": "2.0.0",
   "tasks": [
     {
+      "label": "Local: Deploy canister suite and validate",
+      "detail": "Build canisters, start a clean local replica, deploy the full suite, and call the new functions to confirm they work",
+      "type": "shell",
+      "command": "bash scripts/deploy-local.sh",
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      },
+      "problemMatcher": []
+    },
+    {
       "label": "CI: Run canister test suite",
       "detail": "Install dependencies and run the full canister test suite",
       "type": "shell",
