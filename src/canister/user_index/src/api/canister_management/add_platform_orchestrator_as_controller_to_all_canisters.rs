@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use candid::Principal;
 use ic_cdk_macros::update;
 use shared_utils::common::utils::task::run_task_concurrently;
@@ -12,14 +14,16 @@ pub fn add_platform_orchestrator_as_controller_to_all_canisters() -> Result<Stri
     let platform_orchestrator =
         Principal::from_text(PLATFORM_ORCHESTRATOR_ID).map_err(|e| e.to_string())?;
 
+    // Collect through a HashSet first to deduplicate across the three pools.
+    // A canister can only be in one pool at a time, but stale state could leave
+    // the same ID in multiple collections; deduplicating ensures completed_count
+    // and canisters_remaining stay in sync throughout the operation.
     let canister_ids: Vec<Principal> = CANISTER_DATA.with_borrow(|canister_data| {
-        canister_data
-            .user_principal_id_to_canister_id_map
-            .values()
-            .copied()
-            .chain(canister_data.available_canisters.iter().copied())
-            .chain(canister_data.backup_canister_pool.iter().copied())
-            .collect()
+        let mut seen: HashSet<Principal> = HashSet::new();
+        seen.extend(canister_data.user_principal_id_to_canister_id_map.values().copied());
+        seen.extend(canister_data.available_canisters.iter().copied());
+        seen.extend(canister_data.backup_canister_pool.iter().copied());
+        seen.into_iter().collect()
     });
 
     CANISTER_DATA.with_borrow_mut(|canister_data| {

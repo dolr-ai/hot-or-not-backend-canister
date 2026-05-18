@@ -36,15 +36,100 @@ dfx identity use actions
 # not for holding cycles or ICP balances.
 export DFX_WARNING=-mainnet_plaintext_identity
 
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+# Parse "principal X" entries from dfx Candid output and print one per line.
+extract_principals() {
+  python3 -c "
+import sys, re
+text = sys.stdin.read()
+for p in re.findall(r'principal \"([^\"]+)\"', text):
+    print(p)
+"
+}
+
+# From get_bulk_operation_status output, return the count of canisters_remaining.
+remaining_count() {
+  python3 -c "
+import sys, re
+text = sys.stdin.read()
+m = re.search(r'canisters_remaining\s*=\s*vec\s*\{([^}]*)\}', text, re.DOTALL)
+section = m.group(1) if m else ''
+print(len(re.findall(r'principal', section)))
+"
+}
+
+# From get_bulk_operation_status output, extract completed_count.
+completed_count() {
+  python3 -c "
+import sys, re
+text = sys.stdin.read()
+m = re.search(r'completed_count\s*=\s*([\d_]+)', text)
+print(m.group(1).replace('_', '') if m else '0')
+"
+}
+
+# From get_bulk_operation_status output, return the count of failed_canisters.
+failed_count() {
+  python3 -c "
+import sys, re
+text = sys.stdin.read()
+m = re.search(r'failed_canisters\s*=\s*vec\s*\{([^}]*)\}', text, re.DOTALL)
+section = m.group(1) if m else ''
+print(len(re.findall(r'principal', section)))
+"
+}
+
 # ── Operations ────────────────────────────────────────────────────────────────
 
-echo "==> Calling collect_controlled_canisters on platform_orchestrator (${PLATFORM_ORCHESTRATOR_ID})..."
-result=$(dfx canister call "${PLATFORM_ORCHESTRATOR_ID}" \
-  collect_controlled_canisters --network=ic)
-echo "    Fetched this run: ${result}"
+POLL_INTERVAL=10   # seconds between status polls
+POLL_TIMEOUT=6000   # max seconds to wait per user_index (10 minutes)
 
+echo "==> Fetching all subnet orchestrators from platform_orchestrator..."
+orchestrators=$(dfx canister call "${PLATFORM_ORCHESTRATOR_ID}" \
+  get_all_subnet_orchestrators --network=ic | extract_principals)
+
+total=$(echo "$orchestrators" | grep -c .) || total=0
+echo "    Found ${total} subnet orchestrators."
 echo ""
-echo "==> Querying controlled_canisters total count..."
-count=$(dfx canister call "${PLATFORM_ORCHESTRATOR_ID}" \
-  get_controlled_canisters_count --network=ic)
-echo "    Total stored: ${count}"
+
+index=0
+for user_index_id in $orchestrators; do
+  index=$((index + 1))
+  echo "── [${index}/${total}] user_index: ${user_index_id} ──────────────────────────"
+
+  echo "    Calling add_platform_orchestrator_as_controller_to_all_canisters..."
+  dfx canister call "${user_index_id}" \
+    add_platform_orchestrator_as_controller_to_all_canisters --network=ic
+
+  echo "    Polling get_bulk_operation_status (timeout: ${POLL_TIMEOUT}s)..."
+  elapsed=0
+  while true; do
+    status_output=$(dfx canister call "${user_index_id}" \
+      get_bulk_operation_status --network=ic)
+
+    remaining=$(echo "$status_output" | remaining_count)
+    completed=$(echo "$status_output" | completed_count)
+    failed=$(echo "$status_output"   | failed_count)
+
+    echo "    [${elapsed}s] remaining=${remaining}  completed=${completed}  failed=${failed}"
+
+    if [[ "$remaining" -eq 0 ]]; then
+      echo "    Done. completed=${completed} failed=${failed}"
+      break
+    fi
+
+    if [[ $elapsed -ge $POLL_TIMEOUT ]]; then
+      echo "    Timeout after ${POLL_TIMEOUT}s — ${remaining} canisters still remaining."
+      break
+    fi
+
+    sleep "${POLL_INTERVAL}"
+    elapsed=$((elapsed + POLL_INTERVAL))
+  done
+  echo ""
+done
+
+echo "════════════════════════════════════════════════════════════════"
+echo " All ${total} subnet orchestrators processed."
+echo "════════════════════════════════════════════════════════════════"
