@@ -48,15 +48,16 @@ type PlatformOrchestratorGenericArgumentType = variant {
   UploadWasm : record { WasmType; blob };
 };
 type PlatformOrchestratorGenericResultType = variant {
-  UpgradeSubnetCanisters : Result_1;
-  ProvisionSubnetOrchestrator : Result_2;
-  RemoveSubnetOrchestratorFromAvailableListResult : Result_1;
-  UploadWasm : Result_1;
+  UpgradeSubnetCanisters : Result_2;
+  ProvisionSubnetOrchestrator : Result_3;
+  RemoveSubnetOrchestratorFromAvailableListResult : Result_2;
+  UploadWasm : Result_2;
 };
 type PlatformOrchestratorInitArgs = record { version : text };
-type Result = variant { Ok; Err : text };
-type Result_1 = variant { Ok : text; Err : text };
-type Result_2 = variant { Ok : principal; Err : text };
+type Result = variant { Ok : nat64; Err : text };
+type Result_1 = variant { Ok; Err : text };
+type Result_2 = variant { Ok : text; Err : text };
+type Result_3 = variant { Ok : principal; Err : text };
 type SubnetUpgradeReport = record {
   subnet_wise_report : vec record { principal; UpgradeStatus };
 };
@@ -84,17 +85,17 @@ type WasmType = variant {
 service : (PlatformOrchestratorInitArgs) -> {
   add_principal_as_global_admin : (principal) -> ();
   clear_snapshot : () -> ();
-  collect_controlled_canisters : () -> (nat64);
+  collect_controlled_canisters : () -> (Result);
   collect_creator_dao_stats_in_the_network : () -> ();
   delete_all_sns_creator_token_in_the_network : () -> ();
   delete_all_sns_creator_token_of_an_individual_canister : (principal) -> (
-      Result,
+      Result_1,
     );
-  deposit_cycles_to_canister : (principal, nat) -> (Result_1);
+  deposit_cycles_to_canister : (principal, nat) -> (Result_2);
   deregister_subnet_orchestrator : (principal, bool) -> ();
   download_snapshot : (nat64, nat64) -> (blob) query;
   fixup_individual_cainsters_in_thebreaking_condition_network : () -> ();
-  fixup_individual_canisters_in_a_subnet : (principal) -> (Result);
+  fixup_individual_canisters_in_a_subnet : (principal) -> (Result_1);
   get_all_available_subnet_orchestrators : () -> (vec principal) query;
   get_all_global_admins : () -> (vec principal) query;
   get_all_subnet_orchestrators : () -> (vec principal) query;
@@ -111,66 +112,66 @@ service : (PlatformOrchestratorInitArgs) -> {
   http_request : (HttpRequest) -> (HttpResponse) query;
   is_controlled_canister : (principal) -> (bool) query;
   load_snapshot : () -> ();
-  make_individual_canister_logs_private : (principal) -> (Result);
-  make_individual_canister_logs_public : (principal) -> (Result);
-  make_subnet_orchestrator_logs_private : (principal) -> (Result);
-  make_subnet_orchestrator_logs_public : (principal) -> (Result);
+  make_individual_canister_logs_private : (principal) -> (Result_1);
+  make_individual_canister_logs_public : (principal) -> (Result_1);
+  make_subnet_orchestrator_logs_private : (principal) -> (Result_1);
+  make_subnet_orchestrator_logs_public : (principal) -> (Result_1);
   notify_specific_individual_canister_to_upgrade_creator_dao_governance_canisters : (
       principal,
       blob,
-    ) -> (Result);
+    ) -> (Result_1);
   platform_orchestrator_generic_function : (
       PlatformOrchestratorGenericArgumentType,
     ) -> (PlatformOrchestratorGenericResultType);
   populate_known_principal_for_all_subnet : () -> ();
-  provision_empty_canisters_in_a_subnet : (principal, nat64) -> (Result);
-  provision_subnet_orchestrator_canister : (principal) -> (Result_2);
+  provision_empty_canisters_in_a_subnet : (principal, nat64) -> (Result_1);
+  provision_subnet_orchestrator_canister : (principal) -> (Result_3);
   receive_and_save_snaphot : (nat64, blob) -> ();
   receive_creator_dao_stats_from_subnet_orchestrator : (
       principal,
       vec principal,
-    ) -> (Result);
-  recharge_subnet_orchestrator : () -> (Result);
-  register_new_subnet_orchestrator : (principal, bool) -> (Result);
+    ) -> (Result_1);
+  recharge_subnet_orchestrator : () -> (Result_1);
+  register_new_subnet_orchestrator : (principal, bool) -> (Result_1);
   remove_principal_from_global_admins : (principal) -> ();
-  remove_subnet_orchestrators_from_available_list : (principal) -> (Result_1);
-  report_subnet_upgrade_status : (UpgradeStatus) -> (Result);
-  reset_canisters_ml_feed_cache : () -> (Result_1);
+  remove_subnet_orchestrators_from_available_list : (principal) -> (Result_2);
+  report_subnet_upgrade_status : (UpgradeStatus) -> (Result_1);
+  reset_canisters_ml_feed_cache : () -> (Result_2);
   save_snapshot_json : () -> (nat32);
   set_reserved_cycle_limit_for_subnet_orchestrator : (principal, nat) -> (
-      Result,
+      Result_1,
     );
-  start_reclaiming_cycles_from_individual_canisters : () -> (Result_1);
+  start_reclaiming_cycles_from_individual_canisters : () -> (Result_2);
   start_reclaiming_cycles_from_subnet_orchestrator_canister : () -> (text);
-  start_subnet_orchestrator_canister : (principal) -> (Result);
-  stop_upgrades_for_individual_user_canisters : () -> (Result_1);
+  start_subnet_orchestrator_canister : (principal) -> (Result_1);
+  stop_upgrades_for_individual_user_canisters : () -> (Result_2);
   subnet_orchestrator_maxed_out : () -> ();
-  update_global_known_principal : (KnownPrincipalType, principal) -> (Result_1);
-  update_pd_onboarding_reward_for_all_subnets : (nat) -> (Result);
+  update_global_known_principal : (KnownPrincipalType, principal) -> (Result_2);
+  update_pd_onboarding_reward_for_all_subnets : (nat) -> (Result_1);
   update_profile_owner_for_individual_canisters : () -> ();
-  update_restart_timers_hon_game : () -> (Result_1);
+  update_restart_timers_hon_game : () -> (Result_2);
   update_subnet_known_principal : (
       principal,
       KnownPrincipalType,
       principal,
-    ) -> (Result_1);
+    ) -> (Result_2);
   upgrade_all_creator_dao_governance_canisters_in_the_network : (blob) -> ();
-  upgrade_canisters_in_network : (UpgradeCanisterArg) -> (Result_1);
+  upgrade_canisters_in_network : (UpgradeCanisterArg) -> (Result_2);
   upgrade_individual_canisters_in_a_subnet_with_latest_wasm : (principal) -> (
-      Result,
+      Result_1,
     );
   upgrade_specific_individual_canister : (principal) -> ();
   upgrade_specific_individual_canister_with_version : (principal, text) -> (
-      Result,
+      Result_1,
     );
   upgrade_specific_individual_canister_with_wasm : (principal, text, blob) -> (
-      Result,
+      Result_1,
     );
   upgrade_subnet_orchestrator_canister_with_latest_wasm : (principal) -> (
-      Result,
+      Result_1,
     );
-  upload_wasms : (WasmType, blob) -> (Result_1);
+  upload_wasms : (WasmType, blob) -> (Result_2);
   validate_platform_orchestrator_generic_function : (
       PlatformOrchestratorGenericArgumentType,
-    ) -> (Result_1);
+    ) -> (Result_2);
 }
