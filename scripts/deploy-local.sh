@@ -3,17 +3,20 @@
 # Mirrors the mainnet release flow as closely as possible:
 #   1. Build + regenerate Candid interfaces
 #   2. Deploy platform_orchestrator
-#   3. Upload real wasm blobs to platform_orchestrator via ic-repl (binary Candid,
-#      avoids the 4 MB HTTP text-encoding limit that dfx canister call hits)
-#   4. Create user_index with platform_orchestrator as controller (CMC substitute)
-#   5. platform_orchestrator installs the user_index wasm (mirrors governance upgrade)
-#   6. Register user_index with platform_orchestrator
-#   7. Provision a pool of individual user canisters via user_index
+#   3. Build user_index and individual_user_template via dfx (wasm-opt + gzip)
+#   4. Upload optimized wasm blobs to platform_orchestrator via ic-repl
+#   5. Create user_index with platform_orchestrator as controller (CMC substitute)
+#   6. platform_orchestrator installs the user_index wasm (mirrors governance upgrade)
+#   7. Register user_index with platform_orchestrator
+#   8. Provision a pool of individual user canisters via user_index
 #
-# Note: provision_subnet_orchestrator_canister uses the Cycles Minting Canister (CMC)
-# which is not available on a local replica. Step 4 replicates what CMC does (canister
-# creation only). Every step after that is driven by platform_orchestrator functions,
-# matching mainnet exactly.
+# Wasm upload uses ic-repl (binary Candid) so the payload stays small.
+# dfx build applies wasm-opt (-Os) + gzip: user_index 2.1 MB → 617 KB.
+#
+# Note: provision_subnet_orchestrator_canister calls the Cycles Minting Canister
+# (CMC) to create canisters on specific subnets — CMC is not available locally.
+# Step 5 replicates what CMC does (canister creation only). Every step after
+# that is a real platform_orchestrator function call, matching mainnet exactly.
 #
 # Usage:
 #   bash scripts/deploy-local.sh
@@ -29,7 +32,7 @@ cd "$REPO_ROOT"
 LOCAL_REPLICA="http://localhost:4943"
 VERSION="v0.0.1-local"
 
-# ── Build ─────────────────────────────────────────────────────────────────────
+# ── Build: Candid interfaces + raw wasms ──────────────────────────────────────
 echo "==> Building canisters and regenerating Candid interfaces..."
 bash scripts/generate-candid.sh platform_orchestrator user_index individual_user_template
 
@@ -63,32 +66,38 @@ dfx deploy platform_orchestrator \
 PLATFORM_ORCHESTRATOR_ID="$(dfx canister id platform_orchestrator)"
 echo "    platform_orchestrator: ${PLATFORM_ORCHESTRATOR_ID}"
 
-# ── Upload real wasm blobs to platform_orchestrator ───────────────────────────
-# ic-repl sends binary Candid so the wasm bytes pass through as-is (~2-3 MB),
-# well within the local replica's 4 MB HTTP body limit. dfx canister call
-# text-encodes blobs as \XX hex sequences (4× expansion) and exceeds that limit.
+# ── Build user_index and individual_user_template via dfx ────────────────────
+# dfx build applies wasm-opt (-Os) + gzip (per dfx.json: optimize=size, gzip=true).
+# user_index: 2.1 MB raw → 617 KB; individual_user_template: 451 KB → 132 KB.
+# This keeps the ic-repl upload payloads well within the 4 MB HTTP body limit.
+echo "==> Building user_index (wasm-opt + gzip)..."
+dfx canister create user_index
+dfx build user_index
+USER_INDEX_WASM=".dfx/local/canisters/user_index/user_index.wasm.gz"
+
+echo "==> Building individual_user_template (wasm-opt + gzip)..."
+dfx canister create individual_user_template
+dfx build individual_user_template
+INDIVIDUAL_TEMPLATE_WASM=".dfx/local/canisters/individual_user_template/individual_user_template.wasm.gz"
+
+# ── Upload optimized wasm blobs to platform_orchestrator ─────────────────────
 echo "==> Uploading wasms to platform_orchestrator via ic-repl..."
 cat > /tmp/upload_wasms_local.sh << ICREPL
 #!/usr/bin/ic-repl -o
 identity deployer "${DFX_IDENTITY_PEM}";
 import po = "${PLATFORM_ORCHESTRATOR_ID}" as "${REPO_ROOT}/src/canister/platform_orchestrator/can.did";
-call po.upload_wasms(variant {SubnetOrchestratorWasm}, file("${REPO_ROOT}/target/wasm32-unknown-unknown/release/user_index.wasm"));
-call po.upload_wasms(variant {IndividualUserWasm}, file("${REPO_ROOT}/target/wasm32-unknown-unknown/release/individual_user_template.wasm"));
+call po.upload_wasms(variant {SubnetOrchestratorWasm}, file("${REPO_ROOT}/${USER_INDEX_WASM}"));
+call po.upload_wasms(variant {IndividualUserWasm}, file("${REPO_ROOT}/${INDIVIDUAL_TEMPLATE_WASM}"));
 ICREPL
 ./ic-repl /tmp/upload_wasms_local.sh -r "${LOCAL_REPLICA}"
 rm -f /tmp/upload_wasms_local.sh
 
 # ── Create user_index canister (CMC substitute) ───────────────────────────────
-# On mainnet, platform_orchestrator calls provision_subnet_orchestrator_canister
-# which creates the canister via CMC on a specific subnet, installs the stored
-# SubnetOrchestratorWasm, and provisions the individual canister pool. CMC is not
-# available locally, so we replicate only the canister-creation step with dfx.
-# Every subsequent step is a real platform_orchestrator function call.
-echo "==> Creating user_index canister (CMC substitute — local only)..."
-dfx canister create user_index
-dfx canister update-settings user_index --add-controller "${PLATFORM_ORCHESTRATOR_ID}"
-
+# The canister ID already exists from the dfx build step above.
+# Add platform_orchestrator as a controller to mirror mainnet.
+echo "==> Adding platform_orchestrator as controller of user_index..."
 USER_INDEX_ID="$(dfx canister id user_index)"
+dfx canister update-settings user_index --add-controller "${PLATFORM_ORCHESTRATOR_ID}"
 echo "    user_index: ${USER_INDEX_ID}"
 
 # Initial wasm install — on mainnet platform_orchestrator does this via
@@ -105,10 +114,18 @@ echo "==> Registering user_index with platform_orchestrator..."
 dfx canister call platform_orchestrator register_new_subnet_orchestrator \
   "(principal \"${USER_INDEX_ID}\", true)"
 
+# Top up cycles on both canisters — the upgrade flow makes inter-canister calls
+# that burn cycles. On local dfx, fabricate-cycles works without ICP balance.
+# SUBNET_ORCHESTRATOR_CANISTER_CYCLES_THRESHOLD = 1_000T cycles.
+# user_index must exceed that so PO skips the recharge-before-upgrade step.
+# PO needs enough to run install_code after the threshold check passes.
+echo "==> Topping up cycles on platform_orchestrator and user_index..."
+dfx ledger fabricate-cycles --canister "${PLATFORM_ORCHESTRATOR_ID}" --t 2000
+dfx ledger fabricate-cycles --canister "${USER_INDEX_ID}" --t 2000
+
 # Mirrors what happens when a user_index governance upgrade proposal is approved:
 # governance → platform_orchestrator_generic_function(UpgradeSubnetCanisters) →
 # upgrade_canisters_in_network → recharge_and_upgrade_subnet_orchestrator.
-# Here we drive the single-canister variant directly.
 echo "==> platform_orchestrator upgrading user_index with stored wasm (mirrors governance proposal)..."
 dfx canister call platform_orchestrator upgrade_subnet_orchestrator_canister_with_latest_wasm \
   "(principal \"${USER_INDEX_ID}\")"
@@ -116,13 +133,12 @@ dfx canister call platform_orchestrator upgrade_subnet_orchestrator_canister_wit
 # ── Provision individual canister pool via user_index ─────────────────────────
 # On mainnet, provision_subnet_orchestrator_canister calls
 # create_pool_of_individual_user_available_canisters on user_index after installing it.
-# We replicate that call here using ic-repl (binary Candid, same size reason as above).
 echo "==> Provisioning individual canister pool via user_index..."
 cat > /tmp/provision_pool_local.sh << ICREPL
 #!/usr/bin/ic-repl -o
 identity deployer "${DFX_IDENTITY_PEM}";
 import ui = "${USER_INDEX_ID}" as "${REPO_ROOT}/src/canister/user_index/can.did";
-call ui.create_pool_of_individual_user_available_canisters("${VERSION}", file("${REPO_ROOT}/target/wasm32-unknown-unknown/release/individual_user_template.wasm"));
+call ui.create_pool_of_individual_user_available_canisters("${VERSION}", file("${REPO_ROOT}/${INDIVIDUAL_TEMPLATE_WASM}"));
 ICREPL
 ./ic-repl /tmp/provision_pool_local.sh -r "${LOCAL_REPLICA}"
 rm -f /tmp/provision_pool_local.sh
