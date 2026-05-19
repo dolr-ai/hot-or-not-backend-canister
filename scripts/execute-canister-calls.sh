@@ -82,54 +82,70 @@ print(len(re.findall(r'principal', section)))
 
 # ── Operations ────────────────────────────────────────────────────────────────
 
-POLL_INTERVAL=10   # seconds between status polls
-POLL_TIMEOUT=6000   # max seconds to wait per user_index (10 minutes)
+PAGE_SIZE=5       # canisters per random sample
+SAMPLES=5         # random offsets per iteration
+ITERATIONS=20     # total verification rounds
 
-echo "==> Fetching all subnet orchestrators from platform_orchestrator..."
-orchestrators=$(dfx canister call "${PLATFORM_ORCHESTRATOR_ID}" \
-  get_all_subnet_orchestrators --network=ic | extract_principals)
-
-total=$(echo "$orchestrators" | grep -c .) || total=0
-echo "    Found ${total} subnet orchestrators."
+echo "==> Fetching total controlled_canisters count..."
+total_raw=$(dfx canister call "${PLATFORM_ORCHESTRATOR_ID}" \
+  get_controlled_canisters_count --network=ic)
+total=$(echo "$total_raw" | python3 -c "
+import sys, re
+m = re.search(r'(\d[\d_]*)', sys.stdin.read())
+print(m.group(1).replace('_','') if m else '0')
+")
+echo "    Total: ${total}"
 echo ""
 
-index=0
-for user_index_id in $orchestrators; do
-  index=$((index + 1))
-  echo "── [${index}/${total}] user_index: ${user_index_id} ──────────────────────────"
+if [[ "${total}" -eq 0 ]]; then
+  echo "No controlled canisters found. Run collect_controlled_canisters first."
+  exit 1
+fi
 
-  echo "    Calling add_platform_orchestrator_as_controller_to_all_canisters..."
-  dfx canister call "${user_index_id}" \
-    add_platform_orchestrator_as_controller_to_all_canisters --network=ic
+max_start=$(( total - PAGE_SIZE ))
+total_checked=0
+total_failures=0
 
-  echo "    Polling get_bulk_operation_status (timeout: ${POLL_TIMEOUT}s)..."
-  elapsed=0
-  while true; do
-    status_output=$(dfx canister call "${user_index_id}" \
-      get_bulk_operation_status --network=ic)
+for iteration in $(seq 1 "${ITERATIONS}"); do
+  echo "── Iteration ${iteration}/${ITERATIONS} ────────────────────────────────────"
 
-    remaining=$(echo "$status_output" | remaining_count)
-    completed=$(echo "$status_output" | completed_count)
-    failed=$(echo "$status_output"   | failed_count)
+  iter_failures=0
+  for sample in $(seq 1 "${SAMPLES}"); do
+    start=$(python3 -c "import random; print(random.randint(0, ${max_start}))")
 
-    echo "    [${elapsed}s] remaining=${remaining}  completed=${completed}  failed=${failed}"
+    canister_ids=$(dfx canister call "${PLATFORM_ORCHESTRATOR_ID}" \
+      get_controlled_canisters "(${start} : nat64, ${PAGE_SIZE} : nat64)" --network=ic \
+      | extract_principals)
 
-    if [[ "$remaining" -eq 0 ]]; then
-      echo "    Done. completed=${completed} failed=${failed}"
-      break
-    fi
+    for canister_id in $canister_ids; do
+      total_checked=$(( total_checked + 1 ))
 
-    if [[ $elapsed -ge $POLL_TIMEOUT ]]; then
-      echo "    Timeout after ${POLL_TIMEOUT}s — ${remaining} canisters still remaining."
-      break
-    fi
+      result=$(dfx canister call "${PLATFORM_ORCHESTRATOR_ID}" \
+        get_controllers_and_cycle_balance "(principal \"${canister_id}\")" --network=ic)
 
-    sleep "${POLL_INTERVAL}"
-    elapsed=$((elapsed + POLL_INTERVAL))
+      if echo "${result}" | grep -q "\"${PLATFORM_ORCHESTRATOR_ID}\""; then
+        echo "    ✓  [s${sample} off=${start}] ${canister_id}"
+      else
+        echo "    ✗  [s${sample} off=${start}] ${canister_id} — PO NOT a controller"
+        echo "       raw: ${result}"
+        iter_failures=$(( iter_failures + 1 ))
+        total_failures=$(( total_failures + 1 ))
+      fi
+    done
   done
+
+  echo "    Iteration ${iteration}: ${iter_failures} failures"
   echo ""
 done
 
 echo "════════════════════════════════════════════════════════════════"
-echo " All ${total} subnet orchestrators processed."
+echo " Verification complete."
+echo "  Canisters checked : ${total_checked}  (${ITERATIONS} iterations × ${SAMPLES} samples × ${PAGE_SIZE})"
+echo "  Failures          : ${total_failures}"
+if [[ "${total_failures}" -eq 0 ]]; then
+  echo "  Result: ALL PASS ✓"
+else
+  echo "  Result: FAILURES DETECTED ✗"
+  exit 1
+fi
 echo "════════════════════════════════════════════════════════════════"

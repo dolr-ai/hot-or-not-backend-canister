@@ -1,1 +1,2 @@
-service : { hello_world : () -> (text) query }
+type Result = variant { Ok : nat; Err : text };
+service : { return_cycle_balance_to_platform_orchestrator : () -> (Result) }

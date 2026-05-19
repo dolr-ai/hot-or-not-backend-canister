@@ -3,6 +3,10 @@ type CanisterUpgradeStatus = record {
   count : nat64;
   upgrade_arg : UpgradeCanisterArg;
 };
+type ControlledCanisterDetails = record {
+  controllers : vec principal;
+  cycle_balance : nat;
+};
 type CreatorDaoTokenStats = record {
   total_number_of_creator_dao_tokens : nat64;
   creator_dao_token_sns_canisters : vec record {
@@ -49,7 +53,7 @@ type PlatformOrchestratorGenericArgumentType = variant {
 };
 type PlatformOrchestratorGenericResultType = variant {
   UpgradeSubnetCanisters : Result_2;
-  ProvisionSubnetOrchestrator : Result_3;
+  ProvisionSubnetOrchestrator : Result_4;
   RemoveSubnetOrchestratorFromAvailableListResult : Result_2;
   UploadWasm : Result_2;
 };
@@ -57,7 +61,8 @@ type PlatformOrchestratorInitArgs = record { version : text };
 type Result = variant { Ok : nat64; Err : text };
 type Result_1 = variant { Ok; Err : text };
 type Result_2 = variant { Ok : text; Err : text };
-type Result_3 = variant { Ok : principal; Err : text };
+type Result_3 = variant { Ok : ControlledCanisterDetails; Err : text };
+type Result_4 = variant { Ok : principal; Err : text };
 type SubnetUpgradeReport = record {
   subnet_wise_report : vec record { principal; UpgradeStatus };
 };
@@ -101,6 +106,7 @@ service : (PlatformOrchestratorInitArgs) -> {
   get_all_subnet_orchestrators : () -> (vec principal) query;
   get_controlled_canisters : (nat64, nat64) -> (vec principal) query;
   get_controlled_canisters_count : () -> (nat64) query;
+  get_controllers_and_cycle_balance : (principal) -> (Result_3);
   get_creator_dao_stats : () -> (CreatorDaoTokenStats) query;
   get_global_known_principal : (KnownPrincipalType) -> (principal) query;
   get_subnet_known_principal : (principal, KnownPrincipalType) -> (
@@ -125,7 +131,7 @@ service : (PlatformOrchestratorInitArgs) -> {
     ) -> (PlatformOrchestratorGenericResultType);
   populate_known_principal_for_all_subnet : () -> ();
   provision_empty_canisters_in_a_subnet : (principal, nat64) -> (Result_1);
-  provision_subnet_orchestrator_canister : (principal) -> (Result_3);
+  provision_subnet_orchestrator_canister : (principal) -> (Result_4);
   receive_and_save_snaphot : (nat64, blob) -> ();
   receive_creator_dao_stats_from_subnet_orchestrator : (
       principal,
