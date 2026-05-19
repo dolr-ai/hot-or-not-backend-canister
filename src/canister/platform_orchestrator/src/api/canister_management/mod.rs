@@ -11,6 +11,7 @@ pub mod fixup_individual_canisters_in_a_subnet;
 mod get_all_available_subnet_orchestrators;
 mod get_all_subnet_orchestrators;
 pub mod get_controlled_canisters;
+pub mod get_controllers_and_cycle_balance;
 mod get_last_subnet_upgrade_status;
 mod get_subnets_upgrade_status_report;
 mod global_admin;
