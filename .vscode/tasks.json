@@ -26,6 +26,18 @@
       "problemMatcher": []
     },
     {
+      "label": "Mainnet: Execute canister calls",
+      "detail": "Run ad-hoc canister calls against mainnet as the actions identity (edit execute-canister-calls.sh to change what runs)",
+      "type": "shell",
+      "command": "bash scripts/execute-canister-calls.sh",
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      },
+      "problemMatcher": []
+    },
+    {
       "label": "Mainnet: Monitor long-running task",
       "detail": "Poll all user_indexes round-robin until the active long-running canister operation completes (edit monitor-long-running-task.sh to change what is polled)",
       "type": "shell",
