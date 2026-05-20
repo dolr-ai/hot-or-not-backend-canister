@@ -379,6 +379,30 @@ async fn upgrade_user_canister(
     .map_err(|e| e.1)
 }
 
+/// Like recharge_and_upgrade but uses Install mode — for canisters that have
+/// no wasm installed and therefore cannot be upgraded in place.
+pub(crate) async fn recharge_and_install(
+    user_canister_id: Principal,
+    user_principal_id: Principal,
+    individual_user_wasm: Vec<u8>,
+    individual_user_template_args: IndividualUserTemplateInitArgs,
+) -> Result<(Principal, Principal), ((Principal, Principal), String)> {
+    recharge_canister_for_installing_wasm(user_canister_id)
+        .await
+        .map_err(|e| ((user_principal_id, user_canister_id), e))?;
+
+    upgrade_individual_user_canister(
+        user_canister_id,
+        CanisterInstallMode::Install,
+        individual_user_template_args,
+        individual_user_wasm,
+    )
+    .await
+    .map_err(|e| ((user_principal_id, user_canister_id), e.1))?;
+
+    Ok((user_principal_id, user_canister_id))
+}
+
 pub async fn set_controller_with_platform_orchestrator(
     canister_id_being_updated: Principal,
     platform_orchestrator: Principal,

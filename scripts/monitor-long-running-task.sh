@@ -115,10 +115,22 @@ def parse_version(text):
 
 def parse_failed_count(text):
     """Count entries in failed_canister_ids = vec { record{p;p;msg}; ... }.
-    Each failure tuple has exactly 2 principals; divide principal count by 2."""
-    m = re.search(r'failed_canister_ids\s*=\s*vec\s*\{([^}]*)\}', text, re.DOTALL)
-    section = m.group(1) if m else ''
-    return len(re.findall(r'principal', section)) // 2
+    Uses brace-counting to correctly extract the full vec body (which contains
+    nested record{} entries), then counts 'record {' occurrences — one per failure."""
+    m = re.search(r'failed_canister_ids\s*=\s*vec\s*\{', text, re.DOTALL)
+    if not m:
+        return 0
+    start = m.end()
+    depth = 1
+    for i, ch in enumerate(text[start:], start):
+        if ch == '{':
+            depth += 1
+        elif ch == '}':
+            depth -= 1
+            if depth == 0:
+                section = text[start:i]
+                return section.count('record {')
+    return 0
 
 orchestrators = extract_principals("""${orchestrators_raw}""")
 total_orchestrators = len(orchestrators)

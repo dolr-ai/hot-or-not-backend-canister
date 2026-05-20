@@ -59,6 +59,11 @@ pub struct CanisterData {
     pub controlled_canisters: HashSet<Principal>,
     #[serde(default)]
     pub decommission_status: LongRunningTaskStatus,
+    /// Canister IDs that have successfully completed the full decommission flow
+    /// (cycle return → uninstall → controller update). Used as the authoritative
+    /// idempotency record — if an ID is present here, skip it on re-runs.
+    #[serde(default)]
+    pub decommissioned_canisters: HashSet<Principal>,
 }
 
 fn _default_wasms() -> StableBTreeMap<WasmType, CanisterWasm, Memory> {
@@ -90,6 +95,7 @@ impl Default for CanisterData {
             creator_dao_stats: CreatorDaoTokenStats::default(),
             controlled_canisters: Default::default(),
             decommission_status: Default::default(),
+            decommissioned_canisters: Default::default(),
         }
     }
 }

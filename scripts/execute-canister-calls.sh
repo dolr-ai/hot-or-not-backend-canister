@@ -35,15 +35,71 @@ dfx identity use actions
 export DFX_WARNING=-mainnet_plaintext_identity
 
 # ── Operations ────────────────────────────────────────────────────────────────
+# Verify that both assigned and available individual canisters from a sample of
+# user_indexes are present in platform_orchestrator's controlled_canisters set.
 
-# Example: query how many controlled canisters are stored on platform_orchestrator
-echo "==> get_controlled_canisters_count"
-dfx canister call "${PLATFORM_ORCHESTRATOR_ID}" get_controlled_canisters_count --network=ic
+SAMPLE_PER_UI=5   # available canisters to check per user_index
 
-# Example: query the last subnet upgrade status
-echo "==> get_subnet_last_upgrade_status"
-dfx canister call "${PLATFORM_ORCHESTRATOR_ID}" get_subnet_last_upgrade_status --network=ic
+orchestrators_raw=$(dfx canister call "${PLATFORM_ORCHESTRATOR_ID}" \
+  get_all_subnet_orchestrators --network=ic)
 
-# Example: query the decommission operation status
-echo "==> get_decommission_status"
-dfx canister call "${PLATFORM_ORCHESTRATOR_ID}" get_decommission_status --network=ic
+python3 - <<PYEOF
+import subprocess, re, sys, random
+from datetime import datetime
+
+DFX = ["dfx", "canister", "call", "--network=ic"]
+PO  = "${PLATFORM_ORCHESTRATOR_ID}"
+SAMPLE = ${SAMPLE_PER_UI}
+
+def dfx_call(canister, method, args=""):
+    cmd = DFX + ([canister, method] if not args else [canister, method, args])
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    return r.stdout + r.stderr
+
+def extract_principals(text):
+    return re.findall(r'principal "([^"]+)"', text)
+
+def is_controlled(canister_id):
+    out = dfx_call(PO, "is_controlled_canister", f'(principal "{canister_id}")')
+    return "true" in out.lower()
+
+orchestrators = extract_principals("""${orchestrators_raw}""")
+print(f"Checking available canisters across {len(orchestrators)} user_indexes "
+      f"({SAMPLE} samples each)\n")
+
+total_checked = 0
+total_failures = 0
+
+for ui in orchestrators:
+    available_raw = dfx_call(ui, "get_list_of_available_canisters")
+    available = extract_principals(available_raw)
+
+    if not available:
+        print(f"  {ui}: no available canisters, skipping")
+        continue
+
+    sample = random.sample(available, min(SAMPLE, len(available)))
+
+    ui_failures = 0
+    for cid in sample:
+        total_checked += 1
+        if is_controlled(cid):
+            print(f"  ✓  {ui}  {cid}")
+        else:
+            print(f"  ✗  {ui}  {cid}  — NOT in controlled_canisters")
+            ui_failures += 1
+            total_failures += 1
+
+    if ui_failures:
+        print(f"    ^ {ui_failures} failures on {ui}")
+
+print()
+print("════════════════════════════════════════════════════════════════")
+print(f"  Checked : {total_checked}  Failures : {total_failures}")
+if total_failures == 0:
+    print("  Result  : ALL PASS ✓")
+else:
+    print("  Result  : FAILURES — available canisters missing from controlled_canisters ✗")
+    sys.exit(1)
+print("════════════════════════════════════════════════════════════════")
+PYEOF
