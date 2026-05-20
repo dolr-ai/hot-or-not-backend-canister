@@ -70,15 +70,17 @@ def parse_nat(text):
     return int(m.group(1).replace('_', '')) if m else 0
 
 def get_details(cid):
-    """Returns (controllers, cycle_balance, reserved_cycles)."""
+    """Returns (controllers, cycle_balance, reserved_cycles, canister_status)."""
     raw = dfx_call(PO, "get_controllers_and_cycle_balance", f'(principal "{cid}")')
     controllers = extract_principals(raw)
-    bal = re.search(r'cycle_balance\s*=\s*([\d_]+)', raw)
-    res = re.search(r'reserved_cycles\s*=\s*([\d_]+)', raw)
+    bal  = re.search(r'cycle_balance\s*=\s*([\d_]+)', raw)
+    res  = re.search(r'reserved_cycles\s*=\s*([\d_]+)', raw)
+    stat = re.search(r'status\s*=\s*variant\s*\{\s*(\w+)', raw)
     return (
         controllers,
-        int(bal.group(1).replace('_','')) if bal else -1,
-        int(res.group(1).replace('_','')) if res else -1,
+        int(bal.group(1).replace('_',''))  if bal  else -1,
+        int(res.group(1).replace('_',''))  if res  else -1,
+        stat.group(1)                      if stat else 'Unknown',
     )
 
 # Pick 2 random canisters from the controlled set
@@ -99,11 +101,13 @@ for cid in probe_ids:
     failures = []
 
     # Snapshot BEFORE decommission
-    _, bal_before, res_before = get_details(cid)
+    _, bal_before, res_before, status_before = get_details(cid)
+    frozen_before = status_before in ('Stopped', 'Stopping')
     print(f"  BEFORE  cycle_balance={bal_before/1e9:.0f}M  reserved_cycles={res_before/1e9:.0f}M  "
-          f"total={( bal_before+res_before)/1e9:.0f}M")
+          f"total={(bal_before+res_before)/1e9:.0f}M  status={status_before}"
+          + ("  ⚠ FROZEN — return_cycle_balance will be skipped" if frozen_before else ""))
 
-    # Decommission (double-pass: return → uninstall → reinstall → return → uninstall)
+    # Decommission
     result = dfx_call(PO, "decommission_individual_canister", f'(principal "{cid}")')
     if "err" in result.lower() and "variant { Ok" not in result:
         failures.append(f"decommission returned error: {result.strip()}")
@@ -113,13 +117,13 @@ for cid in probe_ids:
     print(f"  decommission  : {result.strip()}")
 
     # Snapshot immediately AFTER
-    controllers, bal_imm, res_imm = get_details(cid)
-    print(f"  AFTER(imm)  cycle_balance={bal_imm/1e9:.0f}M  reserved_cycles={res_imm/1e9:.0f}M")
+    controllers, bal_imm, res_imm, status_imm = get_details(cid)
+    print(f"  AFTER(imm)  cycle_balance={bal_imm/1e9:.0f}M  reserved_cycles={res_imm/1e9:.0f}M  status={status_imm}")
 
-    # Wait 15s and re-check to test whether reserved release is immediate or delayed
+    # Wait 15s to test whether reserved release is immediate or delayed
     print(f"  Waiting 15s to confirm reserved release timing...")
     time.sleep(15)
-    _, bal_15s, res_15s = get_details(cid)
+    _, bal_15s, res_15s, _ = get_details(cid)
     print(f"  AFTER(15s)  cycle_balance={bal_15s/1e9:.0f}M  reserved_cycles={res_15s/1e9:.0f}M")
 
     if bal_imm == bal_15s and res_imm == res_15s:
@@ -131,8 +135,11 @@ for cid in probe_ids:
     # Cycle recovery summary
     recovered_main = max(0, bal_before - bal_imm)
     recovered_res  = max(0, res_before - res_imm)
-    print(f"  recovered     : {recovered_main/1e9:.0f}M from main + {recovered_res/1e9:.0f}M from reserved "
-          f"= {(recovered_main+recovered_res)/1e9:.0f}M total sent to PO")
+    if frozen_before:
+        print(f"  recovered     : 0M (canister was frozen — could not call return function)")
+    else:
+        print(f"  recovered     : {recovered_main/1e9:.0f}M from main + {recovered_res/1e9:.0f}M from reserved "
+              f"= {(recovered_main+recovered_res)/1e9:.0f}M total sent to PO")
 
     # Assertions
     if controllers == [PO]:
@@ -140,7 +147,10 @@ for cid in probe_ids:
     else:
         failures.append(f"controllers={controllers}, expected [PO only]")
 
-    if 0 <= bal_imm <= CYCLE_WARN:
+    # Frozen canisters legitimately have 0 recovery — not a failure
+    if frozen_before:
+        print(f"  cycle_balance : ℹ {bal_imm/1e9:.0f}M (was frozen, no cycles to recover)")
+    elif 0 <= bal_imm <= CYCLE_WARN:
         print(f"  cycle_balance : ✓ {bal_imm/1e9:.0f}M (within 0.5T threshold)")
     else:
         failures.append(f"cycle_balance={bal_imm/1e9:.0f}M exceeds 0.5T — return may not have run")

@@ -38,6 +38,18 @@
       "problemMatcher": []
     },
     {
+      "label": "Mainnet: Verify backup canister controllers",
+      "detail": "Sample 3 backup pool canisters from a user_index and confirm PO is a controller on each",
+      "type": "shell",
+      "command": "bash scripts/verify-backup-canister-controllers.sh",
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      },
+      "problemMatcher": []
+    },
+    {
       "label": "Mainnet: Monitor long-running task",
       "detail": "Poll all user_indexes round-robin until the active long-running canister operation completes (edit monitor-long-running-task.sh to change what is polled)",
       "type": "shell",

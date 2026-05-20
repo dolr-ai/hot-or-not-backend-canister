@@ -1,9 +1,11 @@
+type CanisterRunningStatus = variant { Stopped; Stopping; Running };
 type CanisterUpgradeStatus = record {
   failures : vec record { principal; text };
   count : nat64;
   upgrade_arg : UpgradeCanisterArg;
 };
 type ControlledCanisterDetails = record {
+  status : CanisterRunningStatus;
   controllers : vec principal;
   cycle_balance : nat;
   reserved_cycles : nat;

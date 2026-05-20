@@ -41,6 +41,7 @@ pub async fn decommission_canister_impl(canister_id: Principal) -> Result<(), St
         .map_err(|e| e.1)?;
 
     let is_installed = status.module_hash.is_some();
+    let reserved_cycles = u128::try_from(status.reserved_cycles.0).unwrap_or(0);
 
     if is_installed {
         // Pass 1: return cycles accumulated during normal operation.
@@ -56,36 +57,39 @@ pub async fn decommission_canister_impl(canister_id: Principal) -> Result<(), St
             .await
             .map_err(|e| e.1)?;
 
-        // Reinstall so return_cycle_balance_to_platform_orchestrator is callable again.
-        let wasm_blob = CANISTER_DATA
-            .with_borrow(|cd| {
-                cd.wasms
-                    .get(&WasmType::IndividualUserWasm)
-                    .map(|w| w.wasm_blob.clone())
+        // Pass 2 (only if there were reserved cycles worth recovering): reinstall the wasm
+        // so return_cycle_balance_to_platform_orchestrator can send the freed reserved
+        // cycles to PO, then do a final uninstall. Skipped when reserved_cycles == 0 since
+        // the reinstall/uninstall overhead would cost more than there is to recover.
+        if reserved_cycles > 0 {
+            let wasm_blob = CANISTER_DATA
+                .with_borrow(|cd| {
+                    cd.wasms
+                        .get(&WasmType::IndividualUserWasm)
+                        .map(|w| w.wasm_blob.clone())
+                })
+                .ok_or("IndividualUserWasm not found in platform_orchestrator storage")?;
+
+            install_code(InstallCodeArgument {
+                mode: CanisterInstallMode::Install,
+                canister_id,
+                wasm_module: wasm_blob,
+                arg: vec![],
             })
-            .ok_or("IndividualUserWasm not found in platform_orchestrator storage")?;
-
-        install_code(InstallCodeArgument {
-            mode: CanisterInstallMode::Install,
-            canister_id,
-            wasm_module: wasm_blob,
-            arg: vec![],
-        })
-        .await
-        .map_err(|e| e.1)?;
-
-        // Pass 2: return the freed reserved cycles now in the main balance.
-        let _ = call::<_, (Result<u128, String>,)>(
-            canister_id,
-            "return_cycle_balance_to_platform_orchestrator",
-            (),
-        )
-        .await;
-
-        // Final uninstall.
-        uninstall_code(CanisterIdRecord { canister_id })
             .await
             .map_err(|e| e.1)?;
+
+            let _ = call::<_, (Result<u128, String>,)>(
+                canister_id,
+                "return_cycle_balance_to_platform_orchestrator",
+                (),
+            )
+            .await;
+
+            uninstall_code(CanisterIdRecord { canister_id })
+                .await
+                .map_err(|e| e.1)?;
+        }
     }
 
     update_settings(UpdateSettingsArgument {

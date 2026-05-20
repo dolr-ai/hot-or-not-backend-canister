@@ -151,6 +151,7 @@ service : (UserIndexInitArgs) -> {
     );
   download_snapshot : (nat64, nat64) -> (blob) query;
   fixup_individual_canisters_mapping : () -> ();
+  get_backup_canister_sample : (nat64) -> (vec principal) query;
   get_bulk_operation_status : () -> (
       BulkIndividualCanisterOperationStatus,
     ) query;
