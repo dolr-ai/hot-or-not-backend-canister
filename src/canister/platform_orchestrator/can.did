@@ -124,6 +124,7 @@ service : (PlatformOrchestratorInitArgs) -> {
   get_subnets_upgrade_status_report : () -> (SubnetUpgradeReport) query;
   get_version : () -> (text) query;
   http_request : (HttpRequest) -> (HttpResponse) query;
+  install_individual_user_wasm : (principal) -> (Result_2);
   is_controlled_canister : (principal) -> (bool) query;
   load_snapshot : () -> ();
   make_individual_canister_logs_private : (principal) -> (Result_2);

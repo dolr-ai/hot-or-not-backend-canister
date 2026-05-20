@@ -35,7 +35,36 @@ dfx identity use actions
 export DFX_WARNING=-mainnet_plaintext_identity
 
 # ── Operations ────────────────────────────────────────────────────────────────
-# Verify that both assigned and available individual canisters from a sample of
+
+USER_INDEX="m4e67-viaaa-aaaal-ad73q-cai"
+
+# These 5 individual canisters had no wasm when the upgrade ran (previously
+# uninstalled by another path). Install the IndividualUserWasm via PO so that
+# return_cycle_balance_to_platform_orchestrator can run, then decommission.
+FAILED_CANISTERS=(
+  "ledwa-6iaaa-aaaal-ahilq-cai"
+  "hqqr4-ziaaa-aaaal-alcfq-cai"
+  "d7gmn-kyaaa-aaaal-aib4q-cai"
+  "vmbhj-yiaaa-aaaal-agx2q-cai"
+  "jq2am-jyaaa-aaaal-aiagq-cai"
+)
+
+for canister_id in "${FAILED_CANISTERS[@]}"; do
+  echo "==> install_individual_user_wasm: ${canister_id}"
+  dfx canister call "${PLATFORM_ORCHESTRATOR_ID}" \
+    install_individual_user_wasm \
+    "(principal \"${canister_id}\")" \
+    --network=ic
+
+  echo "==> decommission_individual_canister: ${canister_id}"
+  dfx canister call "${PLATFORM_ORCHESTRATOR_ID}" \
+    decommission_individual_canister \
+    "(principal \"${canister_id}\")" \
+    --network=ic
+  echo ""
+done
+
+# ── Verify that both assigned and available individual canisters from a sample of
 # user_indexes are present in platform_orchestrator's controlled_canisters set.
 
 SAMPLE_PER_UI=5   # available canisters to check per user_index
