@@ -24,7 +24,10 @@ use self::memory::{
     get_subnet_orchestrator_wasm_memory, Memory,
 };
 
+pub mod long_running_task_status;
 pub mod memory;
+
+use self::long_running_task_status::LongRunningTaskStatus;
 
 #[derive(Serialize, Deserialize, Default)]
 pub struct StateGuard {
@@ -54,6 +57,8 @@ pub struct CanisterData {
     pub creator_dao_stats: CreatorDaoTokenStats,
     #[serde(default)]
     pub controlled_canisters: HashSet<Principal>,
+    #[serde(default)]
+    pub decommission_status: LongRunningTaskStatus,
 }
 
 fn _default_wasms() -> StableBTreeMap<WasmType, CanisterWasm, Memory> {
@@ -84,6 +89,7 @@ impl Default for CanisterData {
             state_guard: StateGuard::default(),
             creator_dao_stats: CreatorDaoTokenStats::default(),
             controlled_canisters: Default::default(),
+            decommission_status: Default::default(),
         }
     }
 }

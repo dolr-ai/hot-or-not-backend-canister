@@ -26,10 +26,10 @@
       "problemMatcher": []
     },
     {
-      "label": "Mainnet: Execute canister calls",
-      "detail": "Run execute-canister-calls.sh as the actions identity against mainnet (edit the script to add/change operations)",
+      "label": "Mainnet: Monitor long-running task",
+      "detail": "Poll all user_indexes round-robin until the active long-running canister operation completes (edit monitor-long-running-task.sh to change what is polled)",
       "type": "shell",
-      "command": "bash scripts/execute-canister-calls.sh",
+      "command": "bash scripts/monitor-long-running-task.sh",
       "group": "build",
       "presentation": {
         "reveal": "always",

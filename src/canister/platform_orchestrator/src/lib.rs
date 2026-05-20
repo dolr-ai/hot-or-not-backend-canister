@@ -4,6 +4,7 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 
 use crate::api::canister_management::get_controllers_and_cycle_balance::ControlledCanisterDetails;
+use crate::data_model::long_running_task_status::LongRunningTaskStatus;
 use crate::api::generic_proposal::{
     PlatformOrchestratorGenericArgumentType, PlatformOrchestratorGenericResultType,
 };
