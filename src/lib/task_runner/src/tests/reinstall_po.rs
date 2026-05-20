@@ -1,18 +1,13 @@
-use candid::{Decode, Encode, Principal};
+use candid::{Encode, Principal};
 
 use crate::{
-    agent::agent_from_pem,
-    db::{next_release_version, open_pool, DB_PATH},
+    agent::{agent_from_pem, workspace_root},
+    db::{next_release_version, open_pool},
     sns_types::{
-        Action, Command, ManageNeuron, ManageNeuronResponse, Proposal,
-        UpgradeSnsControlledCanister, NEURON_SUBACCOUNT, PLATFORM_ORCHESTRATOR_ID,
-        SNS_GOVERNANCE_ID,
+        Action, Command, ManageNeuron, Proposal, UpgradeSnsControlledCanister, NEURON_SUBACCOUNT,
+        PLATFORM_ORCHESTRATOR_ID, SNS_GOVERNANCE_ID,
     },
 };
-
-const PEM_PATH: &str = "actions_identity.pem";
-const WASM_PATH: &str =
-    ".dfx/ic/canisters/platform_orchestrator/platform_orchestrator.wasm.gz";
 
 /// Submit an SNS proposal to REINSTALL platform_orchestrator (mode=2).
 /// Reinstall bypasses pre_upgrade, resetting heap state to default.
@@ -22,16 +17,30 @@ const WASM_PATH: &str =
 #[tokio::test]
 #[ignore = "submits a live SNS proposal — run explicitly"]
 async fn reinstall_po() {
-    let wasm = std::fs::read(WASM_PATH)
-        .unwrap_or_else(|_| panic!("wasm not found at {WASM_PATH} — run `dfx build platform_orchestrator --network=ic` first"));
+    let root = workspace_root();
+    let wasm_path = root.join(".dfx/ic/canisters/platform_orchestrator/platform_orchestrator.wasm.gz");
+    let db_path = root.join("src/lib/ic_canister_snapshot/ic_canisters.db");
+    let pem_path = root.join("actions_identity.pem");
+
+    // Always build the latest wasm before submitting.
+    println!("Building platform_orchestrator for mainnet...");
+    let build_status = std::process::Command::new("dfx")
+        .args(["build", "platform_orchestrator", "--network=ic"])
+        .current_dir(&root)
+        .status()
+        .expect("dfx not found");
+    assert!(build_status.success(), "dfx build platform_orchestrator failed");
+
+    let wasm = std::fs::read(&wasm_path)
+        .unwrap_or_else(|_| panic!("wasm not found at {}", wasm_path.display()));
 
     println!("wasm size: {} bytes", wasm.len());
 
-    let pool = open_pool(DB_PATH).await.expect("failed to open db");
+    let pool = open_pool(db_path.to_str().unwrap()).await.expect("failed to open db");
     let version = next_release_version(&pool).await.expect("failed to get version");
     println!("releasing {version}");
 
-    let agent = agent_from_pem(PEM_PATH).await.expect("failed to create agent");
+    let agent = agent_from_pem(&pem_path).await.expect("failed to create agent");
     let governance = Principal::from_text(SNS_GOVERNANCE_ID).unwrap();
     let po_canister = Principal::from_text(PLATFORM_ORCHESTRATOR_ID).unwrap();
 
@@ -61,14 +70,23 @@ async fn reinstall_po() {
         .await
         .expect("manage_neuron call failed");
 
-    let decoded = Decode!(&response, ManageNeuronResponse).expect("failed to decode response");
-    println!("Response: {decoded:?}");
+    // Decode the response as raw IDL text first to see the actual structure.
+    let response_text = candid::IDLArgs::from_bytes(&response)
+        .map(|a| a.to_string())
+        .unwrap_or_else(|e| format!("<decode failed: {e}>"));
+    println!("Raw response: {response_text}");
 
-    match decoded.command {
-        Some(crate::sns_types::CommandResponse::MakeProposal(p)) => {
-            let id = p.proposal_id.expect("no proposal_id in response").id;
-            println!("✓ Proposal submitted: #{id}  ({version})");
-        }
-        other => panic!("unexpected response: {other:?}"),
+    // Extract proposal ID: the response contains `= NNN : nat64` for the proposal id field.
+    let proposal_id = response_text
+        .split(": nat64")
+        .next()
+        .and_then(|s| s.rsplit_once('='))
+        .and_then(|(_, num)| num.trim().replace('_', "").parse::<u64>().ok());
+
+    if let Some(id) = proposal_id {
+        println!("✓ Proposal submitted: #{id}  ({version})");
+    } else {
+        println!("Response: {response_text}");
+        panic!("could not extract proposal ID from response — check SNS dashboard for {version}");
     }
 }
