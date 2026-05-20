@@ -26,7 +26,10 @@ const PLATFORM_ORCHESTRATOR_ID: &str = "74zq4-iqaaa-aaaam-ab53a-cai";
 ///   6. update_settings([PO]) — set controllers to platform_orchestrator only
 ///   7. insert into decommissioned_canisters
 ///
-/// For canisters that arrive with no wasm (step 1 skipped): controller update only.
+/// For canisters with no wasm (e.g. backup pool): install the wasm first so
+/// return_cycle_balance_to_platform_orchestrator can recover their cycles, then
+/// run the full flow. Since decommissioned_canisters is the idempotency gate,
+/// reaching is_installed=false means the canister has never been processed.
 pub async fn decommission_canister_impl(canister_id: Principal) -> Result<(), String> {
     let already_done = CANISTER_DATA
         .with_borrow(|cd| cd.decommissioned_canisters.contains(&canister_id));
@@ -40,8 +43,32 @@ pub async fn decommission_canister_impl(canister_id: Principal) -> Result<(), St
         .await
         .map_err(|e| e.1)?;
 
-    let is_installed = status.module_hash.is_some();
+    let mut is_installed = status.module_hash.is_some();
     let reserved_cycles = u128::try_from(status.reserved_cycles.0).unwrap_or(0);
+
+    // Backup pool canisters have no wasm but may still hold cycles. Install the
+    // stored IndividualUserWasm so return_cycle_balance_to_platform_orchestrator
+    // can be called, then proceed with the normal cycle-recovery flow.
+    if !is_installed {
+        let wasm_blob = CANISTER_DATA
+            .with_borrow(|cd| {
+                cd.wasms
+                    .get(&WasmType::IndividualUserWasm)
+                    .map(|w| w.wasm_blob.clone())
+            })
+            .ok_or("IndividualUserWasm not found in platform_orchestrator storage")?;
+
+        install_code(InstallCodeArgument {
+            mode: CanisterInstallMode::Install,
+            canister_id,
+            wasm_module: wasm_blob,
+            arg: vec![],
+        })
+        .await
+        .map_err(|e| e.1)?;
+
+        is_installed = true;
+    }
 
     if is_installed {
         // Pass 1: return cycles accumulated during normal operation.

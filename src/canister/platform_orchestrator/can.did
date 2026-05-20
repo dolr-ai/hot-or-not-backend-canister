@@ -98,6 +98,7 @@ type WasmType = variant {
 service : (PlatformOrchestratorInitArgs) -> {
   add_principal_as_global_admin : (principal) -> ();
   clear_snapshot : () -> ();
+  collect_backup_canisters : () -> (Result);
   collect_controlled_canisters : () -> (Result);
   collect_creator_dao_stats_in_the_network : () -> ();
   decommission_all_controlled_canisters : () -> (Result_1);

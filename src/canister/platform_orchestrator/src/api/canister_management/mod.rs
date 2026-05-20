@@ -2,6 +2,7 @@ use ic_cdk_macros::query;
 
 use crate::CANISTER_DATA;
 
+pub mod collect_backup_canisters;
 pub mod collect_controlled_canisters;
 pub mod decommission_all_controlled_canisters;
 mod decommission_canister_impl;
