@@ -82,70 +82,75 @@ print(len(re.findall(r'principal', section)))
 
 # ── Operations ────────────────────────────────────────────────────────────────
 
-PAGE_SIZE=5       # canisters per random sample
-SAMPLES=5         # random offsets per iteration
-ITERATIONS=20     # total verification rounds
+POLL_INTERVAL=10  # seconds between full round-robin sweeps
 
-echo "==> Fetching total controlled_canisters count..."
-total_raw=$(dfx canister call "${PLATFORM_ORCHESTRATOR_ID}" \
-  get_controlled_canisters_count --network=ic)
-total=$(echo "$total_raw" | python3 -c "
-import sys, re
-m = re.search(r'(\d[\d_]*)', sys.stdin.read())
-print(m.group(1).replace('_','') if m else '0')
-")
-echo "    Total: ${total}"
-echo ""
+echo "==> Fetching all subnet orchestrators from platform_orchestrator..."
+orchestrators_raw=$(dfx canister call "${PLATFORM_ORCHESTRATOR_ID}" \
+  get_all_subnet_orchestrators --network=ic)
 
-if [[ "${total}" -eq 0 ]]; then
-  echo "No controlled canisters found. Run collect_controlled_canisters first."
-  exit 1
-fi
+# Hand off to Python for all state-tracking logic.
+# The shell is only responsible for making dfx calls; Python drives the loop.
+python3 - <<PYEOF
+import subprocess, re, sys, time
+from datetime import datetime
 
-max_start=$(( total - PAGE_SIZE ))
-total_checked=0
-total_failures=0
+POLL_INTERVAL = ${POLL_INTERVAL}
+DFX = ["dfx", "canister", "call", "--network=ic"]
 
-for iteration in $(seq 1 "${ITERATIONS}"); do
-  echo "── Iteration ${iteration}/${ITERATIONS} ────────────────────────────────────"
+def dfx_call(canister_id, method, args=""):
+    cmd = DFX + ([canister_id, method] if not args else [canister_id, method, args])
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    return result.stdout + result.stderr
 
-  iter_failures=0
-  for sample in $(seq 1 "${SAMPLES}"); do
-    start=$(python3 -c "import random; print(random.randint(0, ${max_start}))")
+def extract_principals(text):
+    return re.findall(r'principal "([^"]+)"', text)
 
-    canister_ids=$(dfx canister call "${PLATFORM_ORCHESTRATOR_ID}" \
-      get_controlled_canisters "(${start} : nat64, ${PAGE_SIZE} : nat64)" --network=ic \
-      | extract_principals)
+def parse_upgrade_count(text):
+    m = re.search(r'successful_upgrade_count\s*=\s*([\d_]+)', text)
+    return int(m.group(1).replace('_', '')) if m else 0
 
-    for canister_id in $canister_ids; do
-      total_checked=$(( total_checked + 1 ))
+def parse_version(text):
+    m = re.search(r'version\s*=\s*"([^"]+)"', text)
+    return m.group(1) if m else '?'
 
-      result=$(dfx canister call "${PLATFORM_ORCHESTRATOR_ID}" \
-        get_controllers_and_cycle_balance "(principal \"${canister_id}\")" --network=ic)
+orchestrators = extract_principals("""${orchestrators_raw}""")
+total = len(orchestrators)
+print(f"    Found {total} subnet orchestrators.\n")
 
-      if echo "${result}" | grep -q "\"${PLATFORM_ORCHESTRATOR_ID}\""; then
-        echo "    ✓  [s${sample} off=${start}] ${canister_id}"
-      else
-        echo "    ✗  [s${sample} off=${start}] ${canister_id} — PO NOT a controller"
-        echo "       raw: ${result}"
-        iter_failures=$(( iter_failures + 1 ))
-        total_failures=$(( total_failures + 1 ))
-      fi
-    done
-  done
+# Track last-seen successful_upgrade_count per user_index.
+# A user_index is done when its count is unchanged from the previous poll
+# (the upgrade has fully drained and stabilised).
+prev_counts = {ui: None for ui in orchestrators}
+pending = list(orchestrators)
 
-  echo "    Iteration ${iteration}: ${iter_failures} failures"
-  echo ""
-done
+while pending:
+    sweep_time = datetime.now().strftime("%H:%M:%S")
+    still_pending = []
 
-echo "════════════════════════════════════════════════════════════════"
-echo " Verification complete."
-echo "  Canisters checked : ${total_checked}  (${ITERATIONS} iterations × ${SAMPLES} samples × ${PAGE_SIZE})"
-echo "  Failures          : ${total_failures}"
-if [[ "${total_failures}" -eq 0 ]]; then
-  echo "  Result: ALL PASS ✓"
-else
-  echo "  Result: FAILURES DETECTED ✗"
-  exit 1
-fi
-echo "════════════════════════════════════════════════════════════════"
+    for ui in pending:
+        raw = dfx_call(ui, "get_index_details_last_upgrade_status")
+        current = parse_upgrade_count(raw)
+        version  = parse_version(raw)
+        prev     = prev_counts[ui]
+
+        if prev is not None and current == prev:
+            print(f"  ✓ [{sweep_time}] {ui}  upgraded={current}  version={version}")
+        else:
+            print(f"    [{sweep_time}] {ui}  upgraded={current}  version={version}")
+            still_pending.append(ui)
+
+        prev_counts[ui] = current
+
+    pending = still_pending
+    sys.stdout.flush()
+
+    if pending:
+        print(f"  --- {len(pending)} user_index(es) still upgrading, "
+              f"next poll in {POLL_INTERVAL}s ---\n")
+        time.sleep(POLL_INTERVAL)
+
+print()
+print("════════════════════════════════════════════════════════════════")
+print(f" All {total} user_indexes have finished upgrading individual canisters.")
+print("════════════════════════════════════════════════════════════════")
+PYEOF
