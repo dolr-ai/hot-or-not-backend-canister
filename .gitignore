@@ -17,6 +17,7 @@ argument
 icp_index.wasm.gz
 icp_ledger.wasm.gz
 **/*.db
+**/*.db.bak
 **/*.db-shm
 **/*.db-wal
 pocket-ic
