@@ -31,6 +31,13 @@ mod utils;
 thread_local! {
     pub static CANISTER_DATA: RefCell<CanisterData> = RefCell::default();
     pub static SNAPSHOT_DATA: RefCell<Vec<u8>> = RefCell::default();
+    /// Stores debug output from the last post_upgrade run.
+    pub static POST_UPGRADE_DEBUG: RefCell<String> = RefCell::new(String::new());
+}
+
+#[ic_cdk_macros::query]
+fn get_post_upgrade_debug() -> String {
+    POST_UPGRADE_DEBUG.with(|s| s.borrow().clone())
 }
 
 export_candid!();

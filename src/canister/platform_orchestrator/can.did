@@ -121,6 +121,7 @@ service : (PlatformOrchestratorInitArgs) -> {
   get_creator_dao_stats : () -> (CreatorDaoTokenStats) query;
   get_decommission_status : () -> (LongRunningTaskStatus) query;
   get_global_known_principal : (KnownPrincipalType) -> (principal) query;
+  get_post_upgrade_debug : () -> (text) query;
   get_subnet_known_principal : (principal, KnownPrincipalType) -> (
       principal,
     ) query;
