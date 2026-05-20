@@ -1,0 +1,123 @@
+use anyhow::Result;
+use candid::Principal;
+use sqlx::SqlitePool;
+
+pub const DB_PATH: &str = "src/lib/ic_canister_snapshot/ic_canisters.db";
+
+pub async fn open_pool(db_path: &str) -> Result<SqlitePool> {
+    let pool = SqlitePool::connect(&format!("sqlite:{db_path}?mode=rwc")).await?;
+    sqlx::query("PRAGMA journal_mode=WAL").execute(&pool).await?;
+    ensure_schema(&pool).await?;
+    Ok(pool)
+}
+
+async fn ensure_schema(pool: &SqlitePool) -> Result<()> {
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS decommissioned (
+            principal         TEXT PRIMARY KEY,
+            decommissioned_at TEXT NOT NULL
+         );
+         CREATE TABLE IF NOT EXISTS decommission_failures (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            principal TEXT NOT NULL,
+            reason    TEXT NOT NULL,
+            failed_at TEXT NOT NULL
+         );",
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Return up to `limit` principals from po_controlled_canisters not yet decommissioned.
+pub async fn pending_decommissions(pool: &SqlitePool, limit: i64) -> Result<Vec<Principal>> {
+    let rows = sqlx::query!(
+        "SELECT p.principal
+         FROM po_controlled_canisters p
+         WHERE NOT EXISTS (
+             SELECT 1 FROM decommissioned d WHERE d.principal = p.principal
+         )
+         LIMIT ?",
+        limit
+    )
+    .fetch_all(pool)
+    .await?;
+
+    rows.iter()
+        .map(|r| Principal::from_text(&r.principal).map_err(anyhow::Error::from))
+        .collect()
+}
+
+pub async fn mark_decommissioned(pool: &SqlitePool, principal: &Principal) -> Result<()> {
+    let text = principal.to_text();
+    sqlx::query!(
+        "INSERT OR IGNORE INTO decommissioned (principal) VALUES (?)",
+        text
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn mark_failed(pool: &SqlitePool, principal: &Principal, reason: &str) -> Result<()> {
+    let text = principal.to_text();
+    sqlx::query!(
+        "INSERT INTO decommission_failures (principal, reason) VALUES (?, ?)",
+        text,
+        reason
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn decommission_counts(pool: &SqlitePool) -> Result<(i64, i64)> {
+    let done = sqlx::query_scalar!("SELECT COUNT(*) FROM decommissioned")
+        .fetch_one(pool)
+        .await?;
+    let failed = sqlx::query_scalar!("SELECT COUNT(*) FROM decommission_failures")
+        .fetch_one(pool)
+        .await?;
+    Ok((done.unwrap_or(0), failed.unwrap_or(0)))
+}
+
+/// Return the next release version string ("v1", "v2", ...) and increment the counter.
+/// The counter is stored in the `release_counter` table and survives across runs.
+pub async fn next_release_version(pool: &SqlitePool) -> Result<String> {
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS release_counter (
+            id      INTEGER PRIMARY KEY CHECK (id = 1),
+            version INTEGER NOT NULL DEFAULT 0
+         )"
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "INSERT INTO release_counter (id, version) VALUES (1, 0)
+         ON CONFLICT(id) DO NOTHING"
+    )
+    .execute(pool)
+    .await?;
+
+    let version = sqlx::query_scalar!("SELECT version FROM release_counter WHERE id = 1")
+        .fetch_one(pool)
+        .await?
+        .unwrap_or(0);
+
+    let next = version + 1;
+    sqlx::query!("UPDATE release_counter SET version = ? WHERE id = 1", next)
+        .execute(pool)
+        .await?;
+
+    Ok(format!("v{next}"))
+}
+
+pub async fn subnet_orchestrators(pool: &SqlitePool) -> Result<Vec<Principal>> {
+    let rows = sqlx::query!("SELECT principal FROM po_subnet_orchestrators ORDER BY principal")
+        .fetch_all(pool)
+        .await?;
+    rows.iter()
+        .map(|r| Principal::from_text(&r.principal).map_err(anyhow::Error::from))
+        .collect()
+}

@@ -1,0 +1,15 @@
+[package]
+name = "task_runner"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+candid = { workspace = true }
+ic-agent = { version = "0.38", features = ["pem"] }
+serde = { version = "1", features = ["derive"] }
+sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio", "macros"] }
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
