@@ -1,5 +1,4 @@
 use ciborium::de;
-use ic_cdk::api::call::ArgDecoderConfig;
 use ic_cdk_macros::post_upgrade;
 use ic_stable_structures::Memory;
 use shared_utils::{
@@ -31,10 +30,19 @@ fn restore_data_from_stable_memory() {
 }
 
 fn update_version_from_args() {
-    let (upgrade_args,) =
-        ic_cdk::api::call::arg_data::<(PlatformOrchestratorInitArgs,)>(ArgDecoderConfig::default());
-    CANISTER_DATA.with_borrow_mut(|canister_data| {
-        canister_data.version_detail.version = upgrade_args.version;
-        canister_data.version_detail.last_update_on = system_time::get_current_system_time();
-    })
+    // Read raw bytes first; if empty or malformed, keep the existing version rather
+    // than panicking (SNS governance may encode the upgrade arg differently).
+    let raw = ic_cdk::api::call::arg_data_raw();
+    if raw.is_empty() {
+        return;
+    }
+    if let Ok((upgrade_args,)) = candid::decode_args::<(PlatformOrchestratorInitArgs,)>(&raw) {
+        if !upgrade_args.version.is_empty() {
+            CANISTER_DATA.with_borrow_mut(|canister_data| {
+                canister_data.version_detail.version = upgrade_args.version;
+                canister_data.version_detail.last_update_on =
+                    system_time::get_current_system_time();
+            });
+        }
+    }
 }
