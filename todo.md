@@ -3,4 +3,4 @@
 - creator dao canisters owned by 7gaq2
 - individual user canisters currently owned by user_index but will be moved to platform orchestrator
 - user_index canisters owned by platform orchestrator
-
+- once the initial return cycles runs and we run uninstall_code, reserve cycles are returned to the canister. Should we install another wasm into individual canisters and again return cycles to the platform orchestrator? 

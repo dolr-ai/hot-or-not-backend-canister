@@ -1,11 +1,12 @@
 use candid::Principal;
 use ic_cdk::{
     api::management_canister::main::{
-        canister_status, uninstall_code, update_settings, CanisterIdRecord, CanisterSettings,
-        UpdateSettingsArgument,
+        canister_status, install_code, uninstall_code, update_settings, CanisterIdRecord,
+        CanisterInstallMode, CanisterSettings, InstallCodeArgument, UpdateSettingsArgument,
     },
     call,
 };
+use shared_utils::common::types::wasm::WasmType;
 
 use crate::CANISTER_DATA;
 
@@ -13,20 +14,20 @@ const PLATFORM_ORCHESTRATOR_ID: &str = "74zq4-iqaaa-aaaam-ab53a-cai";
 
 /// Core decommission logic, shared by the single and bulk functions.
 ///
-/// Idempotency: reads canister_status first. If the wasm is already uninstalled
-/// AND the only controller is already the platform_orchestrator, the function
-/// is a no-op and returns Ok(()) immediately.
+/// Idempotency: `decommissioned_canisters` set is the single gate. If an ID is
+/// present, the function returns Ok(()) immediately regardless of live state.
 ///
-/// Steps (when work is needed):
-///   1. Best-effort: call return_cycle_balance_to_platform_orchestrator on the
-///      individual canister (sends remaining cycles here; ignored if it fails
-///      because the wasm may already be gone or cycles already sent).
-///   2. uninstall_code — removes the wasm and clears heap + stable memory.
-///   3. update_settings — sets controllers to [platform_orchestrator] only,
-///      removing any residual user_index controller entry.
+/// Full flow for installed canisters (double-pass to recover reserved cycles):
+///   1. return_cycle_balance_to_platform_orchestrator — sends (balance − 100M reserve) to PO
+///   2. uninstall_code — frees heap + stable memory; reserved_cycles come back to main balance
+///   3. install_code(Install) — reinstall so the cycle-return function is callable again
+///   4. return_cycle_balance_to_platform_orchestrator — sends the freed reserved cycles to PO
+///   5. uninstall_code — final removal; leaves only the tiny post-install reserved amount
+///   6. update_settings([PO]) — set controllers to platform_orchestrator only
+///   7. insert into decommissioned_canisters
+///
+/// For canisters that arrive with no wasm (step 1 skipped): controller update only.
 pub async fn decommission_canister_impl(canister_id: Principal) -> Result<(), String> {
-    // Explicit tracking takes priority — if this canister completed the full
-    // cycle-return + uninstall flow in a previous run, skip it immediately.
     let already_done = CANISTER_DATA
         .with_borrow(|cd| cd.decommissioned_canisters.contains(&canister_id));
     if already_done {
@@ -42,7 +43,7 @@ pub async fn decommission_canister_impl(canister_id: Principal) -> Result<(), St
     let is_installed = status.module_hash.is_some();
 
     if is_installed {
-        // Best-effort cycle return — proceed even if it fails.
+        // Pass 1: return cycles accumulated during normal operation.
         let _ = call::<_, (Result<u128, String>,)>(
             canister_id,
             "return_cycle_balance_to_platform_orchestrator",
@@ -50,12 +51,43 @@ pub async fn decommission_canister_impl(canister_id: Principal) -> Result<(), St
         )
         .await;
 
+        // Uninstall: clears heap + stable memory → reserved_cycles released to main balance.
+        uninstall_code(CanisterIdRecord { canister_id })
+            .await
+            .map_err(|e| e.1)?;
+
+        // Reinstall so return_cycle_balance_to_platform_orchestrator is callable again.
+        let wasm_blob = CANISTER_DATA
+            .with_borrow(|cd| {
+                cd.wasms
+                    .get(&WasmType::IndividualUserWasm)
+                    .map(|w| w.wasm_blob.clone())
+            })
+            .ok_or("IndividualUserWasm not found in platform_orchestrator storage")?;
+
+        install_code(InstallCodeArgument {
+            mode: CanisterInstallMode::Install,
+            canister_id,
+            wasm_module: wasm_blob,
+            arg: vec![],
+        })
+        .await
+        .map_err(|e| e.1)?;
+
+        // Pass 2: return the freed reserved cycles now in the main balance.
+        let _ = call::<_, (Result<u128, String>,)>(
+            canister_id,
+            "return_cycle_balance_to_platform_orchestrator",
+            (),
+        )
+        .await;
+
+        // Final uninstall.
         uninstall_code(CanisterIdRecord { canister_id })
             .await
             .map_err(|e| e.1)?;
     }
 
-    // Always enforce: controllers = [platform_orchestrator] only.
     update_settings(UpdateSettingsArgument {
         canister_id,
         settings: CanisterSettings {
@@ -66,7 +98,6 @@ pub async fn decommission_canister_impl(canister_id: Principal) -> Result<(), St
     .await
     .map_err(|e| e.1)?;
 
-    // Record successful completion so re-runs skip this canister.
     CANISTER_DATA.with_borrow_mut(|cd| {
         cd.decommissioned_canisters.insert(canister_id);
     });

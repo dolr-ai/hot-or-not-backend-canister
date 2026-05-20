@@ -6,6 +6,7 @@ type CanisterUpgradeStatus = record {
 type ControlledCanisterDetails = record {
   controllers : vec principal;
   cycle_balance : nat;
+  reserved_cycles : nat;
 };
 type CreatorDaoTokenStats = record {
   total_number_of_creator_dao_tokens : nat64;
