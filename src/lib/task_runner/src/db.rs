@@ -44,7 +44,10 @@ pub async fn pending_decommissions(pool: &SqlitePool, limit: i64) -> Result<Vec<
     .await?;
 
     rows.iter()
-        .map(|r| Principal::from_text(&r.principal).map_err(anyhow::Error::from))
+        .map(|r| {
+            let s = r.principal.as_deref().unwrap_or_default();
+            Principal::from_text(s).map_err(anyhow::Error::from)
+        })
         .collect()
 }
 
@@ -78,7 +81,7 @@ pub async fn decommission_counts(pool: &SqlitePool) -> Result<(i64, i64)> {
     let failed = sqlx::query_scalar!("SELECT COUNT(*) FROM decommission_failures")
         .fetch_one(pool)
         .await?;
-    Ok((done.unwrap_or(0), failed.unwrap_or(0)))
+    Ok((done, failed))
 }
 
 /// Return the next release version string ("v1", "v2", ...) and increment the counter.
@@ -100,10 +103,9 @@ pub async fn next_release_version(pool: &SqlitePool) -> Result<String> {
     .execute(pool)
     .await?;
 
-    let version = sqlx::query_scalar!("SELECT version FROM release_counter WHERE id = 1")
+    let version: i64 = sqlx::query_scalar!("SELECT version FROM release_counter WHERE id = 1")
         .fetch_one(pool)
-        .await?
-        .unwrap_or(0);
+        .await?;
 
     let next = version + 1;
     sqlx::query!("UPDATE release_counter SET version = ? WHERE id = 1", next)
@@ -118,6 +120,9 @@ pub async fn subnet_orchestrators(pool: &SqlitePool) -> Result<Vec<Principal>> {
         .fetch_all(pool)
         .await?;
     rows.iter()
-        .map(|r| Principal::from_text(&r.principal).map_err(anyhow::Error::from))
+        .map(|r| {
+            let s = r.principal.as_deref().unwrap_or_default();
+            Principal::from_text(s).map_err(anyhow::Error::from)
+        })
         .collect()
 }
