@@ -15,19 +15,35 @@ fn restore_data_from_stable_memory() {
     heap_data.read(0, &mut heap_data_len_bytes);
     let heap_data_len = u32::from_le_bytes(heap_data_len_bytes) as usize;
 
-    POST_UPGRADE_DEBUG.with(|s| {
-        *s.borrow_mut() = format!("restore_stable_memory: heap_data_len={}", heap_data_len);
-    });
+    // Guard: empty stable memory means first upgrade after initial install — use defaults.
+    if heap_data_len == 0 {
+        POST_UPGRADE_DEBUG.with(|s| {
+            *s.borrow_mut() = "heap_data_len=0: using default state".to_string();
+        });
+        return;
+    }
 
     let mut canister_data_bytes = vec![0; heap_data_len];
     heap_data.read(4, &mut canister_data_bytes);
-    let canister_data =
-        de::from_reader(&*canister_data_bytes).expect("Failed to deserialize heap data");
-    CANISTER_DATA.with_borrow_mut(|cd| {
-        *cd = canister_data;
-    });
 
-    POST_UPGRADE_DEBUG.with(|s| {
-        *s.borrow_mut() += " | restored OK";
-    });
+    match de::from_reader::<crate::data_model::CanisterData, _>(&*canister_data_bytes) {
+        Ok(canister_data) => {
+            CANISTER_DATA.with_borrow_mut(|cd| {
+                *cd = canister_data;
+            });
+            POST_UPGRADE_DEBUG.with(|s| {
+                *s.borrow_mut() = format!("heap_data_len={} | restored OK", heap_data_len);
+            });
+        }
+        Err(e) => {
+            // Log the error without panicking so we can query it via get_post_upgrade_debug.
+            // State will be default (empty) — recover manually after diagnosing.
+            POST_UPGRADE_DEBUG.with(|s| {
+                *s.borrow_mut() = format!(
+                    "heap_data_len={} | DESER FAILED: {:?}",
+                    heap_data_len, e
+                );
+            });
+        }
+    }
 }

@@ -4,6 +4,32 @@
 .headers on
 .mode column
 
+-- ─── Platform Orchestrator Snapshot ──────────────────────────────────────────
+
+-- Snapshot metadata (version, counts, timestamp)
+SELECT key, value FROM po_metadata ORDER BY key;
+
+-- All 16 subnet orchestrators (user_index canisters)
+SELECT principal FROM po_subnet_orchestrators ORDER BY principal;
+
+-- Controlled canister count
+SELECT COUNT(*) AS controlled_canisters_total FROM po_controlled_canisters;
+
+-- Sample of controlled canisters (first 20)
+SELECT principal FROM po_controlled_canisters ORDER BY principal LIMIT 20;
+
+-- Controlled canisters that are NOT already in the main canisters table (i.e. missing from the IC snapshot)
+SELECT COUNT(*) AS not_in_ic_snapshot
+FROM po_controlled_canisters p
+WHERE NOT EXISTS (SELECT 1 FROM canisters c WHERE c.canister_id = p.principal);
+
+-- Controlled canisters that ARE in the main canisters table, with their module hash
+SELECT c.canister_id, c.module_hash, c.subnet_id
+FROM canisters c
+JOIN po_controlled_canisters p ON p.principal = c.canister_id
+ORDER BY c.canister_id
+LIMIT 20;
+
 -- 3-level hierarchy: distinct canister_ids reachable from the root controllers,
 -- each counted once, with how many canisters they control.
 WITH known_principals AS (
