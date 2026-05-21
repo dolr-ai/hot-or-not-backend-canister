@@ -14,3 +14,4 @@ mod unfollow_user;
 mod update_last_access_time;
 mod update_profile_details;
 mod update_session_type;
+mod validate_install_code;

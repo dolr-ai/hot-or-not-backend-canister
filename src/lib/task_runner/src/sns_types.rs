@@ -24,6 +24,98 @@ pub struct Proposal {
 #[derive(CandidType, Deserialize)]
 pub enum Action {
     UpgradeSnsControlledCanister(UpgradeSnsControlledCanister),
+    AddGenericNervousSystemFunction(NervousSystemFunction),
+    ExecuteGenericNervousSystemFunction(ExecuteGenericNervousSystemFunction),
+    DeregisterDappCanisters(DeregisterDappCanisters),
+    RegisterDappCanisters(RegisterDappCanisters),
+}
+
+// ── DeregisterDappCanisters / RegisterDappCanisters ───────────────────────────
+
+#[derive(CandidType, Deserialize)]
+pub struct DeregisterDappCanisters {
+    pub canister_ids: Vec<Principal>,
+    pub new_controllers: Vec<Principal>,
+}
+
+#[derive(CandidType, Deserialize)]
+pub struct RegisterDappCanisters {
+    pub canister_ids: Vec<Principal>,
+}
+
+// ── AddGenericNervousSystemFunction ───────────────────────────────────────────
+
+#[derive(CandidType, Deserialize)]
+pub struct NervousSystemFunction {
+    pub id: u64,
+    pub name: String,
+    pub description: Option<String>,
+    pub function_type: Option<FunctionType>,
+}
+
+#[derive(CandidType, Deserialize)]
+pub enum FunctionType {
+    NativeNervousSystemFunction(()),
+    GenericNervousSystemFunction(GenericNervousSystemFunction),
+}
+
+#[derive(CandidType, Deserialize)]
+pub struct GenericNervousSystemFunction {
+    pub target_canister_id: Option<Principal>,
+    pub target_method_name: Option<String>,
+    pub validator_canister_id: Option<Principal>,
+    pub validator_method_name: Option<String>,
+}
+
+// ── ExecuteGenericNervousSystemFunction ───────────────────────────────────────
+
+#[derive(CandidType, Deserialize)]
+pub struct ExecuteGenericNervousSystemFunction {
+    pub function_id: u64,
+    pub payload: Vec<u8>,
+}
+
+// ── SNS root change_canister types ────────────────────────────────────────────
+
+#[derive(CandidType, Deserialize)]
+pub enum CanisterInstallMode {
+    #[serde(rename = "install")]
+    Install,
+    #[serde(rename = "reinstall")]
+    Reinstall,
+    #[serde(rename = "upgrade")]
+    Upgrade,
+}
+
+#[derive(CandidType, Deserialize)]
+pub struct ChangeCanisterRequest {
+    pub mode: CanisterInstallMode,
+    pub canister_id: Principal,
+    pub wasm_module: Vec<u8>,
+    pub arg: Vec<u8>,
+    pub stop_before_installing: bool,
+    pub chunked_canister_wasm: Option<()>,
+}
+
+/// Function ID for the change_canister generic function we register with the SNS.
+pub const CHANGE_CANISTER_FUNCTION_ID: u64 = 5001;
+/// SNS root canister — controls platform_orchestrator, has change_canister().
+pub const SNS_ROOT_ID: &str = "67bll-riaaa-aaaaq-aaauq-cai";
+/// user_info_service — controlled by actions identity, hosts validate_install_code.
+pub const USER_INFO_SERVICE_ID: &str = "ivkka-7qaaa-aaaas-qbg3q-cai";
+/// The actions identity principal (neuron controller + co-controller after deregister).
+pub const ACTIONS_PRINCIPAL: &str =
+    "zg7n3-345by-nqf6o-3moz4-iwxql-l6gko-jqdz2-56juu-ja332-unymr-fqe";
+
+// ── IC management canister install_code types ─────────────────────────────────
+
+#[derive(CandidType, Deserialize)]
+pub struct InstallCodeArgument {
+    pub mode: CanisterInstallMode,
+    pub canister_id: Principal,
+    pub wasm_module: Vec<u8>,
+    pub arg: Vec<u8>,
+    pub sender_canister_version: Option<u64>,
 }
 
 #[derive(CandidType, Deserialize)]
