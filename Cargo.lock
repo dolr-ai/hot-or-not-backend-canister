@@ -1133,22 +1133,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dedup_index"
-version = "0.1.0"
-dependencies = [
- "candid",
- "ciborium",
- "futures",
- "ic-cdk 0.15.1",
- "ic-cdk-macros 0.16.0",
- "ic-stable-structures",
- "serde",
- "serde_json",
- "serde_json_any_key",
- "shared_utils",
-]
-
-[[package]]
 name = "der"
 version = "0.7.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4425,21 +4409,6 @@ checksum = "d273983c5a657a70a3e8f2a01329822f3b8c8172b73826411a55751e404a0a4a"
 dependencies = [
  "memchr",
  "minimal-lexical",
-]
-
-[[package]]
-name = "notification_store"
-version = "0.1.0"
-dependencies = [
- "candid",
- "ciborium",
- "ic-cdk 0.15.1",
- "ic-cdk-macros 0.16.0",
- "ic-cdk-timers",
- "ic-stable-structures",
- "serde",
- "shared_utils",
- "test_utils",
 ]
 
 [[package]]

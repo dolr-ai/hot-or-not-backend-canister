@@ -13,9 +13,7 @@ ALL_CANISTERS=(
   individual_user_template
   user_index
   platform_orchestrator
-  notification_store
   user_post_service
-  dedup_index
   user_info_service
   rate_limits
 )

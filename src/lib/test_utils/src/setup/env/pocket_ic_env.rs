@@ -8,7 +8,6 @@ use pocket_ic::{
 };
 use shared_utils::{
     canister_specific::{
-        notification_store::types::args::NotificationStoreInitArgs,
         platform_orchestrator::types::args::PlatformOrchestratorInitArgs,
         user_info_service::args::UserInfoServiceInitArgs,
         user_post_service::types::args::UserPostServiceInitArgs,
@@ -18,7 +17,6 @@ use shared_utils::{
         wasm::WasmType,
     },
     constant::{GLOBAL_SUPER_ADMIN_USER_ID_V1, NNS_CYCLE_MINTING_CANISTER, NNS_LEDGER_CANISTER_ID},
-    service::ServiceInitArgs,
 };
 
 use crate::setup::test_constants::{
@@ -50,9 +48,7 @@ struct AuthorizedSubnetWorks {
 #[derive(Clone, Copy, Debug)]
 pub struct ServiceCanisters {
     pub user_info_service_canister_id: Principal,
-    pub notification_store_canister_id: Principal,
     pub user_post_service_canister_id: Principal,
-    pub dedup_index_canister_id: Principal,
     pub rate_limits_canister_id: Principal,
 }
 
@@ -73,23 +69,7 @@ pub fn get_new_pocket_ic_env_with_service_canisters_provisioned() -> (PocketIc, 
         }),
     );
 
-    let notification_store_canister = pocket_ic.create_canister_with_settings(
-        Some(super_admin),
-        Some(CanisterSettings {
-            controllers: Some(vec![super_admin]),
-            ..Default::default()
-        }),
-    );
-
     let user_post_service_canister = pocket_ic.create_canister_with_settings(
-        Some(super_admin),
-        Some(CanisterSettings {
-            controllers: Some(vec![super_admin]),
-            ..Default::default()
-        }),
-    );
-
-    let dedup_index_canister = pocket_ic.create_canister_with_settings(
         Some(super_admin),
         Some(CanisterSettings {
             controllers: Some(vec![super_admin]),
@@ -106,21 +86,13 @@ pub fn get_new_pocket_ic_env_with_service_canisters_provisioned() -> (PocketIc, 
     );
 
     pocket_ic.add_cycles(user_service_canister, 10_000_000_000_000_000);
-    pocket_ic.add_cycles(notification_store_canister, 10_000_000_000_000_000);
     pocket_ic.add_cycles(user_post_service_canister, 10_000_000_000_000_000);
-    pocket_ic.add_cycles(dedup_index_canister, 10_000_000_000_000_000);
     pocket_ic.add_cycles(rate_limits_canister, 10_000_000_000_000_000);
 
     let user_info_service_canister_wasm = include_bytes!(
         "../../../../../../target/wasm32-unknown-unknown/release/user_info_service.wasm.gz"
     );
 
-    let notification_store_canister_wasm = include_bytes!(
-        "../../../../../../target/wasm32-unknown-unknown/release/notification_store.wasm.gz"
-    );
-    let dedup_index_canister_wasm = include_bytes!(
-        "../../../../../../target/wasm32-unknown-unknown/release/dedup_index.wasm.gz"
-    );
     let rate_limits_canister_wasm = include_bytes!(
         "../../../../../../target/wasm32-unknown-unknown/release/rate_limits.wasm.gz"
     );
@@ -133,10 +105,6 @@ pub fn get_new_pocket_ic_env_with_service_canisters_provisioned() -> (PocketIc, 
         version: "v1.0.0".into(),
     };
 
-    let notification_store_canister_init_args = NotificationStoreInitArgs {
-        version: "v1.0.0".into(),
-    };
-
     let user_post_service_canister_init_args = UserPostServiceInitArgs {
         version: "v1.0.0".into(),
     };
@@ -145,22 +113,6 @@ pub fn get_new_pocket_ic_env_with_service_canisters_provisioned() -> (PocketIc, 
         user_service_canister,
         user_info_service_canister_wasm.to_vec(),
         candid::encode_one(user_info_service_canister_init_args).unwrap(),
-        Some(super_admin),
-    );
-
-    pocket_ic.install_canister(
-        notification_store_canister,
-        notification_store_canister_wasm.to_vec(),
-        candid::encode_one(notification_store_canister_init_args).unwrap(),
-        Some(super_admin),
-    );
-    pocket_ic.install_canister(
-        dedup_index_canister,
-        dedup_index_canister_wasm.to_vec(),
-        candid::encode_one(ServiceInitArgs {
-            version: "v1.0.0".into(),
-        })
-        .unwrap(),
         Some(super_admin),
     );
 
@@ -191,9 +143,7 @@ pub fn get_new_pocket_ic_env_with_service_canisters_provisioned() -> (PocketIc, 
 
     let service_canisters = ServiceCanisters {
         user_info_service_canister_id: user_service_canister,
-        notification_store_canister_id: notification_store_canister,
         user_post_service_canister_id: user_post_service_canister,
-        dedup_index_canister_id: dedup_index_canister,
         rate_limits_canister_id: rate_limits_canister,
     };
 

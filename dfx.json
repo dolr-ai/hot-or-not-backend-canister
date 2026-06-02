@@ -5,17 +5,6 @@
       "candid": "./src/lib/integration_tests/tests/pump_n_dump/mock_ledger/ledger.did",
       "wasm": "./src/lib/integration_tests/tests/pump_n_dump/mock_ledger/ic-icrc1-ledger.wasm.gz"
     },
-    "notification_store": {
-      "candid": "./src/canister/notification_store/can.did",
-      "declaration": {
-        "node_compatibility": true,
-        "output": "./export/declarations/notification_store"
-      },
-      "gzip": true,
-      "optimize": "size",
-      "package": "notification_store",
-      "type": "rust"
-    },
     "user_post_service": {
       "candid": "./src/canister/user_post_service/can.did",
       "declaration": {
@@ -80,17 +69,6 @@
       "gzip": true,
       "optimize": "size",
       "package": "platform_orchestrator",
-      "type": "rust"
-    },
-    "dedup_index": {
-      "candid": "./src/canister/dedup_index/can.did",
-      "declaration": {
-        "node_compatibility": true,
-        "output": "./export/declarations/dedup_index"
-      },
-      "gzip": true,
-      "optimize": "size",
-      "package": "dedup_index",
       "type": "rust"
     },
     "rate_limits": {
