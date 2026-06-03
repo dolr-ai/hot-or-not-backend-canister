@@ -10,6 +10,8 @@ serde = { version = "1", features = ["derive"] }
 sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio", "macros"] }
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"
+sha2 = "0.10"
+hex = "0.4"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
