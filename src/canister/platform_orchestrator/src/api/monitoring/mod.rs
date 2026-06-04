@@ -9,7 +9,13 @@ use shared_utils::common::{
 };
 
 fn get_path(url: &str) -> Option<&str> {
-    url.split('?').next()
+    // Strip scheme + host, then strip query params.
+    let after_scheme = url.split("://").last().unwrap_or(url);
+    let path = after_scheme.split('/').next().map(|_| {
+        let idx = after_scheme.find('/').unwrap_or(0);
+        &after_scheme[idx..]
+    });
+    path.map(|p| p.split('?').next().unwrap_or(p))
 }
 
 fn metrics() -> String {
@@ -46,6 +52,9 @@ fn metrics() -> String {
 fn retrieve(path: &str) -> Option<Vec<u8>> {
     match path {
         "/metrics" => Some(metrics().as_bytes().to_vec()),
+        "/hello" => Some(
+            b"Hello from platform_orchestrator (upgraded via direct controller access)".to_vec(),
+        ),
         _ => None,
     }
 }

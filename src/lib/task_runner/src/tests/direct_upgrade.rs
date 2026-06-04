@@ -12,11 +12,11 @@ use std::process::Command;
 
 use anyhow::{Context, Result};
 use candid::{Encode, Principal};
-use ic_agent::Agent;
+use sha2::{Digest, Sha256};
 
 use crate::{
     agent::{agent_from_pem, workspace_root},
-    sns_types::{CanisterInstallMode, InstallCodeArgument, PLATFORM_ORCHESTRATOR_ID},
+    sns_types::PLATFORM_ORCHESTRATOR_ID,
 };
 
 // ── Helper types for PO API calls ─────────────────────────────────────────────
@@ -60,15 +60,13 @@ fn build_canister(name: &str) -> Result<std::path::PathBuf> {
     anyhow::ensure!(status.success(), "dfx build {name} failed");
 
     let wasm_path = root.join(format!(".dfx/ic/canisters/{name}/{name}.wasm.gz"));
-    let size = std::fs::metadata(&wasm_path)
-        .map(|m| m.len())
-        .unwrap_or(0);
+    let size = std::fs::metadata(&wasm_path).map(|m| m.len()).unwrap_or(0);
     println!("  wasm: {} ({} bytes)", wasm_path.display(), size);
 
     // Print SHA-256 for audit trail.
     let wasm_bytes = std::fs::read(&wasm_path)
         .with_context(|| format!("wasm not found at {}", wasm_path.display()))?;
-    let hash = sha2::Digest::digest(&wasm_bytes);
+    let hash = Sha256::digest(&wasm_bytes);
     println!("  sha256: {}", hex::encode(hash));
 
     Ok(wasm_path)
@@ -90,7 +88,7 @@ fn regenerate_candid(canisters: &[&str]) -> Result<()> {
     let root = workspace_root();
     println!("Regenerating Candid interfaces...");
     let mut args = vec!["scripts/generate-candid.sh"];
-    args.extend(canisters.iter().map(|s| s.as_str()));
+    args.extend(canisters.iter().map(|s| *s));
     let status = Command::new("bash")
         .args(&args)
         .current_dir(&root)
@@ -110,6 +108,35 @@ fn get_canister_id(name: &str) -> Result<Principal> {
         .context("dfx not found")?;
     let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
     Principal::from_text(&text).with_context(|| format!("invalid principal for {name}: {text}"))
+}
+
+/// Upgrade a canister via dfx CLI (reliable for management canister calls).
+fn upgrade_canister_via_dfx(canister_name: &str, wasm_path: &std::path::Path, version: &str) -> Result<()> {
+    let root = workspace_root();
+    println!("  Running dfx canister install --mode=upgrade {canister_name}...");
+
+    let output = Command::new("dfx")
+        .args([
+            "canister", "install", "--mode=upgrade", canister_name,
+            "--network=ic",
+            "--yes",
+            "--argument", &format!("(record {{version=\"{version}\"}})"),
+        ])
+        .current_dir(&root)
+        .output()
+        .context("dfx not found")?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    if !output.status.success() {
+        anyhow::bail!(
+            "dfx canister install failed:\nstdout: {stdout}\nstderr: {stderr}"
+        );
+    }
+
+    println!("  stdout: {}", stdout.trim());
+    Ok(())
 }
 
 // ── Core upgrade logic ────────────────────────────────────────────────────────
@@ -135,38 +162,26 @@ async fn upgrade_fleet(scope: ReleaseScope) -> Result<()> {
     match scope {
         ReleaseScope::PoOnly => regenerate_candid(&["platform_orchestrator"])?,
         ReleaseScope::PoAndUi => regenerate_candid(&["platform_orchestrator", "user_index"])?,
-        ReleaseScope::All => {
-            regenerate_candid(&["platform_orchestrator", "user_index", "individual_user_template"])?
-        }
+        ReleaseScope::All => regenerate_candid(&[
+            "platform_orchestrator",
+            "user_index",
+            "individual_user_template",
+        ])?,
     }
 
     let version = timestamp_version();
     println!("\nVersion: {version}");
 
+    // ── Step 2: Upgrade platform_orchestrator directly via dfx ─────────────────
+    // ic-agent's HTTP transport to the management canister (aaaaa-aa) is unreliable.
+    // dfx uses a different transport path that works consistently.
+    println!("\n==> Upgrading platform_orchestrator...");
+    upgrade_canister_via_dfx("platform_orchestrator", &po_wasm_path, &version)?;
+    println!("✓ platform_orchestrator upgraded");
+
+    // ── Step 3: Upgrade subnet canisters via PO API (ic-agent works fine for regular canisters) ──
     let agent = agent_from_pem(&pem_path).await?;
     let po = Principal::from_text(PLATFORM_ORCHESTRATOR_ID)?;
-    let management = Principal::from_text("aaaaa-aa")?;
-
-    // ── Step 2: Upgrade platform_orchestrator directly ─────────────────────────
-    let po_wasm = std::fs::read(&po_wasm_path)?;
-    let upgrade_arg = Encode!(&version).unwrap();
-
-    println!("\n==> Upgrading platform_orchestrator...");
-    let arg = Encode!(&InstallCodeArgument {
-        mode: CanisterInstallMode::Upgrade,
-        canister_id: po,
-        wasm_module: po_wasm,
-        arg: upgrade_arg,
-        sender_canister_version: None,
-    })?;
-
-    agent
-        .update(&management, "install_code")
-        .with_arg(arg)
-        .call_and_wait()
-        .await?;
-
-    println!("✓ platform_orchestrator upgraded");
 
     // ── Step 3: Upgrade user_index fleet (if in scope) ─────────────────────────
     if let Some(ui_wasm_path) = ui_wasm_path {
