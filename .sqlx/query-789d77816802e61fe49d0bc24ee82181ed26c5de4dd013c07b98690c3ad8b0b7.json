@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT p.principal\n         FROM po_controlled_canisters p\n         WHERE NOT EXISTS (\n             SELECT 1 FROM decommissioned d WHERE d.principal = p.principal\n         )\n         LIMIT ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "principal",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "789d77816802e61fe49d0bc24ee82181ed26c5de4dd013c07b98690c3ad8b0b7"
+}

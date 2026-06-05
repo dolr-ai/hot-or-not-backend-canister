@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO decommission_failures (principal, reason) VALUES (?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "ba5a527c2b2bfe7513fe2ce92c826245a5e083bc1da74835a3ba114e09389023"
+}

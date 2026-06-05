@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT principal FROM po_subnet_orchestrators ORDER BY principal",
+  "describe": {
+    "columns": [
+      {
+        "name": "principal",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "43535a108d00a211ec6c885672f328248a36202bdeb7711f48cd68e41b9363ad"
+}
