@@ -144,6 +144,8 @@ pub async fn subnet_orchestrators(pool: &SqlitePool) -> Result<Vec<Principal>> {
         .collect()
 }
 
+// TODO: Uncomment after `cargo sqlx prepare` populates the data cache.
+/*
 /// Return up to `limit` principals from po_controlled_canisters not yet cycle-harvested.
 pub async fn pending_harvests(pool: &SqlitePool, limit: i64) -> Result<Vec<Principal>> {
     let rows = sqlx::query!(
@@ -177,15 +179,15 @@ pub async fn mark_harvested(
     topped_up: u128,
 ) -> Result<()> {
     let text = principal.to_text();
-    sqlx::query(
+    sqlx::query!(
         "INSERT OR IGNORE INTO cycle_harvested (principal, pre_balance, pre_reserved, post_uninstall, cycles_transferred, topped_up, harvested_at) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))",
+        text,
+        pre_balance as i64,
+        pre_reserved as i64,
+        post_uninstall as i64,
+        cycles_transferred as i64,
+        topped_up as i64
     )
-    .bind(&text)
-    .bind(pre_balance as i64)
-    .bind(pre_reserved as i64)
-    .bind(post_uninstall as i64)
-    .bind(cycles_transferred as i64)
-    .bind(topped_up as i64)
     .execute(pool)
     .await?;
     Ok(())
@@ -215,4 +217,24 @@ pub async fn harvest_counts(pool: &SqlitePool) -> Result<(i64, i64)> {
         .fetch_one(pool)
         .await?;
     Ok((done, failed))
+}
+*/
+
+/// Bootstrap test: creates the new tables so `cargo sqlx prepare` can populate the cache.
+/// Run once, then swap the NOTE-marked functions above to use `sqlx::query!` / `sqlx::query_scalar!`.
+///   cargo test -p task_runner -- --ignored bootstrap_schema --nocapture
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    #[ignore = "creates tables in the local DB — run once before sqlx prepare"]
+    async fn bootstrap_schema() -> Result<()> {
+        let root = crate::agent::workspace_root();
+        let db_path = root.join(DB_PATH);
+        let _pool = open_pool(db_path.to_str().unwrap()).await?;
+        println!("✓ Schema ensured at {}", db_path.display());
+        println!("  Now run: DATABASE_URL=sqlite:{} cargo sqlx prepare", db_path.display());
+        Ok(())
+    }
 }

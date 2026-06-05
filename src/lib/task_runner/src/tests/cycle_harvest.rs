@@ -27,7 +27,7 @@ use crate::{
         harvest_counts, mark_harvest_failed, mark_harvested, open_pool, pending_harvests, DB_PATH,
     },
     sns_types::{
-        ACTIONS_PRINCIPAL, INSTALL_MODE_INSTALL, PLATFORM_ORCHESTRATOR_ID,
+        INSTALL_MODE_INSTALL, PLATFORM_ORCHESTRATOR_ID,
     },
 };
 
@@ -83,13 +83,13 @@ struct CanisterSettings {
 
 // ── Core harvest logic ────────────────────────────────────────────────────────
 
-/// Harvest cycles from a single canister. Returns (cycles_transferred, topped_up).
+/// Harvest cycles from a single canister. Returns (pre_balance, pre_reserved, post_uninstall, cycles_transferred, topped_up).
 async fn harvest_canister(
     agent: &ic_agent::Agent,
     po: Principal,
     canister_id: Principal,
     wasm_blob: &[u8],
-) -> Result<(u128, u128)> {
+) -> Result<(u128, u128, u128, u128, u128)> {
     println!("\n  ── Harvesting {} ──", canister_id);
 
     // Step 1: Get pre-state via PO's get_controllers_and_cycle_balance.
@@ -102,18 +102,15 @@ async fn harvest_canister(
 
     // Decode Result<ControlledCanisterDetails, Text>
     let details: (Result<ControlledCanisterDetails, String>,) =
-        candid::decode_one(&response).context("failed to decode canister status")?;
-    let details = details.0.context("get_controllers_and_cycle_balance returned error")?;
+        candid::decode_one(&response).map_err(|e| anyhow::anyhow!("failed to decode canister status: {}", e))?;
+    let details = details.0.map_err(|e| anyhow::anyhow!("get_controllers_and_cycle_balance returned error: {}", e))?;
 
     let pre_balance = details.cycle_balance;
     let pre_reserved = details.reserved_cycles;
     let has_wasm = matches!(details.status, CanisterRunningStatus::Running | CanisterRunningStatus::Stopped);
-    // Note: module_hash isn't exposed in ControlledCanisterDetails, so we infer from status.
-    // A canister with no wasm would be Stopped and have 0 balance typically.
-    // We'll try uninstall regardless — if it fails (no wasm), we skip to install.
 
     println!(
-        "  pre_balance: {:?} TC, pre_reserved: {:?} TC, status: {:?}",
+        "  pre_balance: {} TC, pre_reserved: {} TC, status: {:?}",
         format_cycles(pre_balance),
         format_cycles(pre_reserved),
         details.status
@@ -126,11 +123,10 @@ async fn harvest_canister(
         .with_arg(add_ctrl_arg)
         .call_and_wait()
         .await
-        .context("add_our_identity_as_controller failed")?;
+        .map_err(|e| anyhow::anyhow!("add_our_identity_as_controller failed: {}", e))?;
     println!("  ✓ actions_identity added as controller");
 
     // Step 3: Uninstall wasm (if installed).
-    let mut did_uninstall = false;
     if has_wasm {
         let uninstall_arg = Encode!(&CanisterIdRecord { canister_id })?;
         let result = agent
@@ -144,12 +140,11 @@ async fn harvest_canister(
 
         match result {
             Ok(_) => {
-                did_uninstall = true;
                 println!("  ✓ wasm uninstalled (reserved cycles released)");
             }
             Err(e) => {
                 // If uninstall fails, the canister may have no wasm — proceed to install.
-                println!("  ⚠ uninstall_code failed (canister may have no wasm): {}", e.1);
+                println!("  ⚠ uninstall_code failed (canister may have no wasm): {}", e);
             }
         }
     }
@@ -163,19 +158,19 @@ async fn harvest_canister(
         .await?;
 
     let details: (Result<ControlledCanisterDetails, String>,) =
-        candid::decode_one(&response).context("failed to decode post-uninstall status")?;
-    let details = details.0.context("get_controllers_and_cycle_balance returned error")?;
+        candid::decode_one(&response).map_err(|e| anyhow::anyhow!("failed to decode post-uninstall status: {}", e))?;
+    let details = details.0.map_err(|e| anyhow::anyhow!("get_controllers_and_cycle_balance returned error: {}", e))?;
     let post_uninstall_balance = details.cycle_balance;
 
     println!(
-        "  post_uninstall_balance: {:?} TC",
+        "  post_uninstall_balance: {} TC",
         format_cycles(post_uninstall_balance)
     );
 
     let mut topped_up: u128 = 0;
     if post_uninstall_balance < MIN_REINSTALL_BALANCE {
         println!(
-            "  ⚠ balance too low ({:?} TC < {:?} TC), topping up with 0.5T...",
+            "  ⚠ balance too low ({} TC < {} TC), topping up with 0.5T...",
             format_cycles(post_uninstall_balance),
             format_cycles(MIN_REINSTALL_BALANCE)
         );
@@ -187,7 +182,7 @@ async fn harvest_canister(
             .with_arg(deposit_arg)
             .call_and_wait()
             .await
-            .context("deposit_cycles_to_canister failed")?;
+            .map_err(|e| anyhow::anyhow!("deposit_cycles_to_canister failed: {}", e))?;
 
         topped_up = TOP_UP_AMOUNT;
         println!("  ✓ topped up with 0.5T");
@@ -210,12 +205,12 @@ async fn harvest_canister(
         .with_arg(install_arg)
         .call_and_wait()
         .await
-        .context("install_code failed")?;
+        .map_err(|e| anyhow::anyhow!("install_code failed: {}", e))?;
     println!("  ✓ wasm installed");
 
     // Step 6: Transfer cycles to PO.
     let transfer_result = agent
-        .update(canister_id, "return_cycle_balance_to_platform_orchestrator")
+        .update(&canister_id, "return_cycle_balance_to_platform_orchestrator")
         .with_arg(Encode!(&())?)
         .call_and_wait()
         .await;
@@ -223,7 +218,7 @@ async fn harvest_canister(
     let cycles_transferred = match transfer_result {
         Ok(response) => {
             let (result,): (Result<u128, String>,) =
-                candid::decode_one(&response).context("failed to decode transfer result")?;
+                candid::decode_one(&response).map_err(|e| anyhow::anyhow!("failed to decode transfer result: {}", e))?;
             match result {
                 Ok(amount) => amount,
                 Err(e) => {
@@ -233,14 +228,14 @@ async fn harvest_canister(
             }
         }
         Err(e) => {
-            println!("  ⚠ return_cycle_balance call failed: {}", e.1);
+            println!("  ⚠ return_cycle_balance call failed: {}", e);
             0
         }
     };
 
     if cycles_transferred > 0 {
         println!(
-            "  ✓ transferred {:?} TC to platform_orchestrator",
+            "  ✓ transferred {} TC to platform_orchestrator",
             format_cycles(cycles_transferred)
         );
     }
@@ -255,7 +250,7 @@ async fn harvest_canister(
         .with_arg(uninstall_arg)
         .call_and_wait()
         .await
-        .context("final uninstall_code failed")?;
+        .map_err(|e| anyhow::anyhow!("final uninstall_code failed: {}", e))?;
     println!("  ✓ final uninstall done");
 
     // Step 8: Set controllers to [PO] only via management canister.
@@ -276,7 +271,7 @@ async fn harvest_canister(
         .with_arg(settings_arg)
         .call_and_wait()
         .await
-        .context("update_settings failed")?;
+        .map_err(|e| anyhow::anyhow!("update_settings failed: {}", e))?;
     println!("  ✓ controllers set to [PO] only");
 
     // Step 9: Validate final state.
@@ -288,8 +283,8 @@ async fn harvest_canister(
         .await?;
 
     let details: (Result<ControlledCanisterDetails, String>,) =
-        candid::decode_one(&response).context("failed to decode final status")?;
-    let details = details.0.context("get_controllers_and_cycle_balance returned error")?;
+        candid::decode_one(&response).map_err(|e| anyhow::anyhow!("failed to decode final status: {}", e))?;
+    let details = details.0.map_err(|e| anyhow::anyhow!("get_controllers_and_cycle_balance returned error: {}", e))?;
 
     // Validate controllers are [PO] only.
     if details.controllers.len() != 1 || details.controllers[0] != po {
@@ -302,11 +297,11 @@ async fn harvest_canister(
     }
 
     println!(
-        "  ✓ final balance: {:?} TC",
+        "  ✓ final balance: {} TC",
         format_cycles(details.cycle_balance)
     );
 
-    Ok((cycles_transferred, topped_up))
+    Ok((pre_balance, pre_reserved, post_uninstall_balance, cycles_transferred, topped_up))
 }
 
 /// Format cycles as trillions with 2 decimal places.
@@ -371,16 +366,16 @@ async fn harvest_single_canister() -> Result<()> {
     let agent = agent_from_pem(&pem_path).await?;
     let po = Principal::from_text(PLATFORM_ORCHESTRATOR_ID)?;
 
-    let (transferred, topped_up) = harvest_canister(&agent, po, *canister_id, &wasm_blob).await?;
+    let (pre_balance, pre_reserved, post_uninstall, transferred, topped_up) =
+        harvest_canister(&agent, po, *canister_id, &wasm_blob).await?;
 
-    // Mark as harvested in DB.
-    let pre_info = get_pre_info_for_log(*canister_id); // placeholder — actual values logged during harvest
+    // Mark as harvested in DB — only after all steps succeed and validations pass.
     mark_harvested(
         &pool,
         canister_id,
-        0, // pre_balance — tracked in logs for now
-        0, // pre_reserved
-        0, // post_uninstall
+        pre_balance,
+        pre_reserved,
+        post_uninstall,
         transferred,
         topped_up,
     )
@@ -388,12 +383,6 @@ async fn harvest_single_canister() -> Result<()> {
 
     println!("\n✓ Harvest complete for {}", canister_id);
     Ok(())
-}
-
-/// Placeholder — returns dummy values. In practice, the harvest_canister function
-/// logs all balance figures; the DB record captures transferred + topped_up.
-fn get_pre_info_for_log(_canister_id: Principal) -> (u128, u128) {
-    (0, 0)
 }
 
 /// Harvest cycles from a batch of canisters (BATCH_SIZE at a time).
@@ -455,16 +444,16 @@ async fn harvest_cycles_batch() -> Result<()> {
         );
 
         match harvest_canister(&agent, po, *canister_id, &wasm_blob).await {
-            Ok((transferred, topped_up)) => {
+            Ok((pre_balance, pre_reserved, post_uninstall, transferred, topped_up)) => {
                 total_transferred += transferred;
 
-                // Mark as harvested in DB.
+                // Mark as harvested in DB — only after all steps succeed.
                 mark_harvested(
                     &pool,
                     canister_id,
-                    0, // pre_balance — logged during harvest
-                    0, // pre_reserved
-                    0, // post_uninstall
+                    pre_balance,
+                    pre_reserved,
+                    post_uninstall,
                     transferred,
                     topped_up,
                 )
@@ -472,7 +461,7 @@ async fn harvest_cycles_batch() -> Result<()> {
 
                 batch_success += 1;
                 println!(
-                    "  ✓ [{}] harvested, transferred {:?} TC{}",
+                    "  ✓ [{}] harvested, transferred {} TC{}",
                     i + 1,
                     format_cycles(transferred),
                     if topped_up > 0 { " (topped up)" } else { "" }
@@ -486,11 +475,6 @@ async fn harvest_cycles_batch() -> Result<()> {
                 // Mark as failed in DB.
                 mark_harvest_failed(&pool, canister_id, &reason).await.ok();
             }
-        }
-
-        // Brief pause between canisters to avoid rate limiting.
-        if i < pending.len() - 1 {
-            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
         }
     }
 
