@@ -1,7 +1,6 @@
 use std::cell::RefCell;
 
 use crate::api::canister_management::get_controllers_and_cycle_balance::ControlledCanisterDetails;
-use crate::api::canister_management::get_decommission_status::DecommissionStatus;
 use candid::Principal;
 use data_model::CanisterData;
 use ic_cdk_macros::export_candid;

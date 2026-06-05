@@ -107,6 +107,14 @@ pub const USER_INFO_SERVICE_ID: &str = "ivkka-7qaaa-aaaas-qbg3q-cai";
 pub const ACTIONS_PRINCIPAL: &str =
     "zg7n3-345by-nqf6o-3moz4-iwxql-l6gko-jqdz2-56juu-ja332-unymr-fqe";
 
+// IC management canister install_code mode values (raw i32 for direct calls).
+/// 1 = Install (fresh installation)
+pub const INSTALL_MODE_INSTALL: i32 = 1;
+/// 2 = Reinstall (wipes state, reinstalls)
+pub const INSTALL_MODE_REINSTALL: i32 = 2;
+/// 3 = Upgrade (preserves state, upgrades wasm)
+pub const INSTALL_MODE_UPGRADE: i32 = 3;
+
 // ── IC management canister install_code types ─────────────────────────────────
 
 #[derive(CandidType, Deserialize)]

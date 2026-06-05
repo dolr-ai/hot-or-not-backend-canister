@@ -1,3 +1,4 @@
+mod cycle_harvest;
 mod deregister_reinstall_reregister;
 mod direct_upgrade;
 mod reinstall_po;

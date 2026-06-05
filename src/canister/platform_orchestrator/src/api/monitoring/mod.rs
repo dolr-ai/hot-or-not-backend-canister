@@ -23,7 +23,7 @@ fn metrics() -> String {
     let timestamp = api::time() / 1000000;
     let canister_type = "platform_orchestrator";
 
-    vec![
+    [
         format!(
             "cycle_balance{{type=\"{}\"}} {} {}",
             canister_type,
@@ -46,7 +46,7 @@ fn metrics() -> String {
         )
         .as_str(),
     ]
-    .connect("\n")
+    .join("\n")
 }
 
 fn retrieve(path: &str) -> Option<Vec<u8>> {
