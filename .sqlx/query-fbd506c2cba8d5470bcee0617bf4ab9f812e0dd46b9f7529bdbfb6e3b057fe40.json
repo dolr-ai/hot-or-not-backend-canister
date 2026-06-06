@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "CREATE TABLE IF NOT EXISTS release_counter (\n            id      INTEGER PRIMARY KEY CHECK (id = 1),\n            version INTEGER NOT NULL DEFAULT 0\n         )",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "fbd506c2cba8d5470bcee0617bf4ab9f812e0dd46b9f7529bdbfb6e3b057fe40"
+}

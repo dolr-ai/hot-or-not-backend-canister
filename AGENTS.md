@@ -81,6 +81,60 @@ Verify after deployment:
 - If a new process is introduced, document it here and keep the language prescriptive.
 - Keep agent edits minimal when updating workflows: update the official script or docs, then update `AGENTS.md`.
 
+## SQL / Database Access (sqlx)
+
+**Hard rule: only compile-time checked queries are permitted.**
+
+- Every interaction with SQLite (in `task_runner` and `ic_canister_snapshot`) **must** use the checked macros:
+  - `sqlx::query!(...)` for statements that do not return rows (INSERT, UPDATE, DELETE, CREATE, PRAGMA, etc.)
+  - `sqlx::query_scalar!(...)` for single-value SELECTs (COUNT(*), single columns, etc.)
+  - `sqlx::query_as!(Type, ...)` (or the equivalent typed form) for row-to-struct mapping
+- **Never** use the runtime string forms: `sqlx::query("...")`, `query_scalar("...")`, `query_as::<_, T>("...")`, or any `.bind()` on a raw query string.
+- This rule applies to **all** statements, including initialisation PRAGMAs and `CREATE TABLE IF NOT EXISTS` / index DDL. There are no exceptions for "setup" or "infrastructure" queries.
+- **One narrow, documented exception for SQLite PRAGMA connection tuning only**:
+  - The two PRAGMA *assignment* statements executed at pool open time in `task_runner/src/db.rs:open_pool` and `ic_canister_snapshot/src/fetch.rs:open_and_init_db` (`journal_mode = WAL` and `synchronous = NORMAL`) are written with the raw runtime form `sqlx::query("PRAGMA ... = ...").execute(...)`.
+  - Reason: SQLite's PRAGMA assignment syntax returns a row whose column is reported to the driver as untyped/NULL during sqlx macro expansion. No combination of `query!` / `query_scalar!` (plain or wrapped in `SELECT CAST(...)`) can be prepared against it without a syntax error or "no built-in mapping for NULL".
+  - Immediately after each setter we issue the corresponding *getter* (`PRAGMA journal_mode`, `PRAGMA synchronous`) using the checked `query_scalar!` macro; those are clean typed columns and are recorded in `.sqlx/`.
+  - Every other statement in the two crates — every CREATE TABLE / INDEX, every INSERT / UPDATE / SELECT / COUNT used by decommission tracking, cycle harvest (po_* tables, pending_harvests, mark_harvested, etc.), snapshot population, checkpoints, and progress — **must** be written with the checked `!` macros. The exception is strictly limited to these two initialisation lines.
+- Rationale: type safety at compile time, prevention of schema drift, consistent behaviour across the two crates that share the `ic_canisters.db` file, and elimination of runtime SQL surprises. "No shortcuts. We only do queries that are type checked."
+
+**Destructive operations and schema changes — strict prohibition**
+
+- **Never ever drop tables without checking in with me.** This is a standing, non-negotiable instruction from the operator.
+- You must **never** execute, propose, or generate any command, script, test, or one-off that performs `DROP TABLE`, `DROP TABLE IF EXISTS`, `DROP INDEX`, `DELETE FROM` (outside of narrowly scoped, versioned cleanup of transient rows), `TRUNCATE`, or any other destructive removal of tables or rows in `ic_canisters.db` (or any other SQLite file used for decommission, cycle harvest, canister snapshot, or PO-controlled canister tracking).
+- All schema changes must be **additive and data-preserving**:
+  - `CREATE TABLE IF NOT EXISTS`
+  - `CREATE INDEX IF NOT EXISTS`
+  - `ALTER TABLE ... ADD COLUMN` (only when it does not lose or invalidate existing data)
+  - New tables or new versioned tables following the same patterns used for `decommissioned` / `cycle_harvested` etc.
+- This rule applies even for "preparing a clean DB for sqlx prepare", "resetting for tests", "local development convenience", or "one-time migration scripts". There are no exceptions.
+- This is consistent with the root repository `AGENTS.md` "Immutable Data Operations" and "1. Immutable Data Operations" principles. Treat the SQLite tracking DB with the same immutability discipline as production ClickHouse / Kafka / object storage state.
+- If a table is truly obsolete, the correct path is: (1) stop writing to it, (2) stop reading from it, (3) propose removal only after explicit operator approval and after a data-preserving archival step if any historical data must be retained. Never drop first and ask later.
+
+**Workflow when adding or changing queries:**
+
+1. Write the new/changed query using the `!` macro form.
+2. If the query references a table/column that does not yet exist in the on-disk DB used for prepare, first ensure the schema is present **using only additive, non-destructive commands**:
+   - For task_runner tables (decommissioned, cycle_harvested, release_counter, etc.): run the ignored bootstrap test:
+     `cargo test -p task_runner -- --ignored bootstrap_schema --nocapture`
+   - For snapshot tables (canisters, controllers, progress): run the corresponding ignored populate test.
+   - For tables populated by external operator scripts such as `po_controlled_canisters` (created by `scripts/snapshot-po-state.sh`): use a pure additive sqlite3 command, for example:
+     ```
+     sqlite3 ic_canisters.db "CREATE TABLE IF NOT EXISTS po_controlled_canisters (principal TEXT PRIMARY KEY);"
+     ```
+     **Never** run the snapshot-po-state.sh (or any other script) if it would DROP tables, unless you have received explicit "yes, you may drop" confirmation from the operator in this conversation for this specific operation.
+3. Then populate / refresh the compile-time query cache:
+   ```
+   DATABASE_URL=sqlite:<absolute-path-to-ic_canisters.db> cargo sqlx prepare --workspace
+   ```
+4. Commit the updated `.sqlx/` directory contents along with the code change.
+
+The `.sqlx/` cache **must** be checked into version control.
+
+If a prepare fails with "no database rows" or "unknown column" errors, the tables were not present in the DATABASE_URL database at prepare time — re-run the appropriate bootstrap / additive create step first. Never "fix" this by writing a DROP-based reset.
+
+**Scripts that currently contain DROP statements (e.g. `scripts/snapshot-po-state.sh`)** are operator-only tools. When an agent needs to refresh the po_* data for prepare or testing purposes, it must propose running a non-destructive subset or ask the operator for permission before invoking any DROP-containing logic. The default is to use the minimal `CREATE TABLE IF NOT EXISTS` above.
+
 ## When to Update This File
 
 Update `AGENTS.md` whenever any of the following change:

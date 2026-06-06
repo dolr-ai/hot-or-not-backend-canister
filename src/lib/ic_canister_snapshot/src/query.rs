@@ -1,7 +1,9 @@
 /// Query helpers for the IC canister snapshot database.
 ///
 /// Call these from any test after `populate_db` has been run at least once.
-use rusqlite::{params, Connection};
+///
+/// All functions are async and take `&sqlx::SqlitePool`.
+use sqlx::SqlitePool;
 
 use crate::fetch::{db_path, open_and_init_db};
 
@@ -9,50 +11,46 @@ use crate::fetch::{db_path, open_and_init_db};
 
 /// Open the snapshot database.  Pass `Some(path)` to override the default path
 /// or the `IC_CANISTER_DB_PATH` env var.
-pub fn open_db(path: Option<&str>) -> Connection {
+///
+/// Async: returns a SqlitePool.
+pub async fn open_db(path: Option<&str>) -> SqlitePool {
     let resolved = path.map(|s| s.to_string()).unwrap_or_else(db_path);
-    open_and_init_db(&resolved)
+    open_and_init_db(&resolved).await
 }
 
 // ─── query functions ──────────────────────────────────────────────────────────
 
 /// Return the canister IDs of every canister whose controller list contains
 /// `principal_id` (text form, e.g. `"rrkah-fqaaa-aaaaa-aaaaq-cai"`).
-pub fn find_canisters_by_controller(conn: &Connection, principal_id: &str) -> Vec<String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT canister_id FROM controllers
-             WHERE controller = ?1
-             ORDER BY canister_id",
-        )
-        .expect("failed to prepare find_canisters_by_controller statement");
-
-    stmt.query_map(params![principal_id], |row| row.get(0))
-        .expect("query failed")
-        .filter_map(|r| r.ok())
-        .collect()
+pub async fn find_canisters_by_controller(pool: &SqlitePool, principal_id: &str) -> Vec<String> {
+    sqlx::query_scalar!(
+        "SELECT canister_id FROM controllers
+         WHERE controller = ?
+         ORDER BY canister_id",
+        principal_id
+    )
+    .fetch_all(pool)
+    .await
+    .expect("find_canisters_by_controller query failed")
 }
 
 /// Return all controllers for the given canister ID.
-pub fn get_controllers_for_canister(conn: &Connection, canister_id: &str) -> Vec<String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT controller FROM controllers
-             WHERE canister_id = ?1
-             ORDER BY controller",
-        )
-        .expect("failed to prepare get_controllers_for_canister statement");
-
-    stmt.query_map(params![canister_id], |row| row.get(0))
-        .expect("query failed")
-        .filter_map(|r| r.ok())
-        .collect()
+pub async fn get_controllers_for_canister(pool: &SqlitePool, canister_id: &str) -> Vec<String> {
+    sqlx::query_scalar!(
+        "SELECT controller FROM controllers
+         WHERE canister_id = ?
+         ORDER BY controller",
+        canister_id
+    )
+    .fetch_all(pool)
+    .await
+    .expect("get_controllers_for_canister query failed")
 }
 
 // ─── metadata struct ──────────────────────────────────────────────────────────
 
 /// Metadata for a single canister row.
-#[derive(Debug)]
+#[derive(Debug, sqlx::FromRow)]
 pub struct CanisterInfo {
     pub canister_id: String,
     pub api_id: Option<i64>,
@@ -63,23 +61,27 @@ pub struct CanisterInfo {
 }
 
 /// Return metadata for a canister, or `None` if it is not in the database.
-pub fn get_canister_info(conn: &Connection, canister_id: &str) -> Option<CanisterInfo> {
-    conn.query_row(
-        "SELECT canister_id, api_id, subnet_id, module_hash, language, updated_at
-         FROM canisters WHERE canister_id = ?1",
-        params![canister_id],
-        |row| {
-            Ok(CanisterInfo {
-                canister_id: row.get(0)?,
-                api_id: row.get(1)?,
-                subnet_id: row.get(2)?,
-                module_hash: row.get(3)?,
-                language: row.get(4)?,
-                updated_at: row.get(5)?,
-            })
-        },
+pub async fn get_canister_info(pool: &SqlitePool, canister_id: &str) -> Option<CanisterInfo> {
+    // The "canister_id!" override tells sqlx's checked macro that this column is
+    // NOT NULL (PRIMARY KEY in the schema). This is required because the
+    // compile-time probe (especially when .sqlx/ metadata is being refreshed or
+    // when DATABASE_URL is not set for a later cargo check) can report TEXT PK
+    // columns as nullable. The ! suffix forces the correct non-Option type.
+    sqlx::query_as!(
+        CanisterInfo,
+        r#"SELECT canister_id as "canister_id!",
+                  api_id,
+                  subnet_id,
+                  module_hash,
+                  language,
+                  updated_at
+           FROM canisters WHERE canister_id = ?"#,
+        canister_id
     )
+    .fetch_optional(pool)
+    .await
     .ok()
+    .flatten()
 }
 
 // ─── tests ────────────────────────────────────────────────────────────────────
@@ -94,14 +96,14 @@ mod tests {
     ///
     /// Run with:
     ///   cargo test -p ic_canister_snapshot test_find_canisters_by_controller -- --ignored
-    #[test]
+    #[tokio::test]
     #[ignore]
-    fn test_find_canisters_by_controller() {
-        let conn = open_db(None);
+    async fn test_find_canisters_by_controller() {
+        let pool = open_db(None).await;
 
         // NNS governance canister controls many NNS-related canisters.
         let principal = "rrkah-fqaaa-aaaaa-aaaaq-cai";
-        let canisters = find_canisters_by_controller(&conn, principal);
+        let canisters = find_canisters_by_controller(&pool, principal).await;
 
         println!(
             "[test] {} controls {} canister(s)",
@@ -109,7 +111,7 @@ mod tests {
             canisters.len()
         );
         for id in &canisters {
-            let controllers = get_controllers_for_canister(&conn, id);
+            let controllers = get_controllers_for_canister(&pool, id).await;
             println!("  {} => controllers: {:?}", id, controllers);
         }
 
@@ -126,14 +128,14 @@ mod tests {
     ///
     /// Run with:
     ///   cargo test -p ic_canister_snapshot test_get_controllers_for_canister -- --ignored
-    #[test]
+    #[tokio::test]
     #[ignore]
-    fn test_get_controllers_for_canister() {
-        let conn = open_db(None);
+    async fn test_get_controllers_for_canister() {
+        let pool = open_db(None).await;
 
         let canister_id = "ryjl3-tyaaa-aaaaa-aaaba-cai"; // NNS ICP ledger
-        let controllers = get_controllers_for_canister(&conn, canister_id);
-        let info = get_canister_info(&conn, canister_id);
+        let controllers = get_controllers_for_canister(&pool, canister_id).await;
+        let info = get_canister_info(&pool, canister_id).await;
 
         println!("[test] Controllers of {}: {:?}", canister_id, controllers);
         println!("[test] Canister info: {:#?}", info);

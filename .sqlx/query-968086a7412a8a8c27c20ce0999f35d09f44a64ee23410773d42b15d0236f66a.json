@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "CREATE TABLE IF NOT EXISTS progress (\n            id                    INTEGER PRIMARY KEY CHECK (id = 1),\n            last_completed_offset INTEGER NOT NULL DEFAULT -1\n        )",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "968086a7412a8a8c27c20ce0999f35d09f44a64ee23410773d42b15d0236f66a"
+}

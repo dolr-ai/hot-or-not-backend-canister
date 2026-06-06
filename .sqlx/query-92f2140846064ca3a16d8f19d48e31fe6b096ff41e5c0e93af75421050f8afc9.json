@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "CREATE TABLE IF NOT EXISTS controllers (\n            canister_id TEXT NOT NULL,\n            controller  TEXT NOT NULL,\n            PRIMARY KEY (canister_id, controller)\n        )",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "92f2140846064ca3a16d8f19d48e31fe6b096ff41e5c0e93af75421050f8afc9"
+}

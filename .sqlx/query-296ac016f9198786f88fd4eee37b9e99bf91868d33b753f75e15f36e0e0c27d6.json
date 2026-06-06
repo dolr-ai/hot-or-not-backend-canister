@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "CREATE TABLE IF NOT EXISTS po_decommission_failed (\n            principal TEXT,\n            reason    TEXT\n         )",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "296ac016f9198786f88fd4eee37b9e99bf91868d33b753f75e15f36e0e0c27d6"
+}

@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT COUNT(*) FROM decommission_failures",
+  "query": "SELECT COUNT(*) FROM cycle_harvested",
   "describe": {
     "columns": [
       {
@@ -17,5 +17,5 @@
       false
     ]
   },
-  "hash": "3fd95cfdc9c61e122c031132b8eb6982e24348b5488568737d6fc2cc4fe76462"
+  "hash": "68bddd3df1565e043f297747c898f5648774c5c5521ff17e6d8380a4af02de72"
 }

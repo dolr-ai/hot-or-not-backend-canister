@@ -111,7 +111,7 @@ fn get_canister_id(name: &str) -> Result<Principal> {
 }
 
 /// Upgrade a canister via dfx CLI (reliable for management canister calls).
-fn upgrade_canister_via_dfx(canister_name: &str, wasm_path: &std::path::Path, version: &str) -> Result<()> {
+fn upgrade_canister_via_dfx(canister_name: &str, _wasm_path: &std::path::Path, version: &str) -> Result<()> {
     let root = workspace_root();
     println!("  Running dfx canister install --mode=upgrade {canister_name}...");
 

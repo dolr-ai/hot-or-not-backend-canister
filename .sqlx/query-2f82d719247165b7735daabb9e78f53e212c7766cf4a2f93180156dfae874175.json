@@ -1,16 +1,16 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT version FROM release_counter WHERE id = 1",
+  "query": "SELECT last_completed_offset FROM progress WHERE id = 1",
   "describe": {
     "columns": [
       {
-        "name": "version",
+        "name": "last_completed_offset",
         "ordinal": 0,
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "release_counter",
-            "name": "version"
+            "table": "progress",
+            "name": "last_completed_offset"
           }
         }
       }
@@ -22,5 +22,5 @@
       false
     ]
   },
-  "hash": "77e7d1c71e95eea4bbfc961531cf70834e6a7f98bfccb060310594eec1e70572"
+  "hash": "2f82d719247165b7735daabb9e78f53e212c7766cf4a2f93180156dfae874175"
 }

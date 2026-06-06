@@ -12,17 +12,11 @@ pocket-ic = { workspace = true }
 shared_utils = { workspace = true }
 serde = { workspace = true }
 ic-ledger-types = { workspace = true }
-ic-sns-init = { workspace = true }
 hex = "0.4.3"
 sha256 = "1.5.0"
 sha2 = "0.10.8"
 flate2 = "1.0.33"
 serde_bytes = "0.11.15"
-ic-sns-wasm = { workspace = true }
-ic-base-types = { workspace = true }
-icp-ledger = { workspace = true }
-ic-sns-swap = { workspace = true }
-ic-sns-governance = { workspace = true }
 
 [dev-dependencies]
 ic-test-state-machine-client = { workspace = true }

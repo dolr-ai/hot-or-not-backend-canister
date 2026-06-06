@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT controller FROM controllers\n         WHERE canister_id = ?\n         ORDER BY controller",
+  "describe": {
+    "columns": [
+      {
+        "name": "controller",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "controllers",
+            "name": "controller"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "1fbb4a1ab7327c0f5e9369c9029718da79cc4bb64c4adaf9074ef8cb4b5284a3"
+}

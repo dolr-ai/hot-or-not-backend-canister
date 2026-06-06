@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT p.principal\n         FROM po_controlled_canisters p\n         WHERE NOT EXISTS (\n             SELECT 1 FROM decommissioned d WHERE d.principal = p.principal\n         )\n         LIMIT ?",
+  "query": "SELECT p.principal\n         FROM po_controlled_canisters p\n         WHERE NOT EXISTS (\n             SELECT 1 FROM cycle_harvested d WHERE d.principal = p.principal\n         )\n         LIMIT ?",
   "describe": {
     "columns": [
       {
@@ -22,5 +22,5 @@
       true
     ]
   },
-  "hash": "789d77816802e61fe49d0bc24ee82181ed26c5de4dd013c07b98690c3ad8b0b7"
+  "hash": "bdda9720ccb0b023f77006b7c14470e53896bff004cb99d9f58e90eebdc89e15"
 }

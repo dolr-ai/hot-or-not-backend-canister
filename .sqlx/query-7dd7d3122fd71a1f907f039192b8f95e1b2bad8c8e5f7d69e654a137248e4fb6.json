@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "CREATE TABLE IF NOT EXISTS cycle_harvest_failures (\n            id        INTEGER PRIMARY KEY AUTOINCREMENT,\n            principal TEXT NOT NULL,\n            reason    TEXT NOT NULL,\n            failed_at TEXT NOT NULL\n         )",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "7dd7d3122fd71a1f907f039192b8f95e1b2bad8c8e5f7d69e654a137248e4fb6"
+}

@@ -21,16 +21,6 @@ serde_json = { workspace = true }
 serde_json_any_key = "2.0.0"
 serde_bytes = "0.11.14"
 futures = { workspace = true }
-ic-sns-init.workspace = true
-ic-sns-root.workspace = true
-ic-sns-wasm.workspace = true
-ic-sns-governance.workspace = true
-ic-nns-governance.workspace = true
-ic-base-types.workspace = true
-ic-nns-constants.workspace = true
-ic-icrc1-ledger.workspace = true
-ic-icrc1-index-ng.workspace = true
-ic-icrc1-index.workspace = true
 icrc-ledger-types.workspace = true
 hex = "0.4.3"
 num-bigint = "0.4.6"

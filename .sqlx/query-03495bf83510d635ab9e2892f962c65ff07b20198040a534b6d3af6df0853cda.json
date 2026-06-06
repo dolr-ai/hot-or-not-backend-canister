@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "CREATE TABLE IF NOT EXISTS po_controlled_canisters (\n            principal TEXT PRIMARY KEY\n         )",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "03495bf83510d635ab9e2892f962c65ff07b20198040a534b6d3af6df0853cda"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "CREATE TABLE IF NOT EXISTS canisters (\n            canister_id   TEXT PRIMARY KEY,\n            api_id        INTEGER,\n            subnet_id     TEXT,\n            module_hash   TEXT,\n            name          TEXT,\n            language      TEXT,\n            canister_type TEXT,\n            updated_at    TEXT\n        )",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "9c19e74b07a98b0616c3648682a809fb061968cc08b24a0dc381d18383ecec63"
+}

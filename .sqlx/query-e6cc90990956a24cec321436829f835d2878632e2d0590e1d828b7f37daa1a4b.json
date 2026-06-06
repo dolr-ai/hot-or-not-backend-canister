@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "CREATE TABLE IF NOT EXISTS decommissioned (\n            principal         TEXT PRIMARY KEY,\n            decommissioned_at TEXT NOT NULL\n         )",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "e6cc90990956a24cec321436829f835d2878632e2d0590e1d828b7f37daa1a4b"
+}

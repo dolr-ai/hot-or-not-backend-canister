@@ -19,7 +19,6 @@ serde_json = { workspace = true }
 ic-stable-structures = { workspace = true }
 ciborium = { workspace = true }
 futures = { workspace = true }
-ic-sns-root = { workspace = true }
 icrc-ledger-types.workspace = true
 
 [dev-dependencies]
