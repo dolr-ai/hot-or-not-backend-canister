@@ -3,7 +3,6 @@ use shared_utils::canister_specific::individual_user_template::types::profile::U
 use shared_utils::canister_specific::user_info_service::types::{
     SubscriptionPlan, YralProSubscription,
 };
-use shared_utils::service;
 use test_utils::canister_calls::{query, update};
 use test_utils::setup::env::pocket_ic_env::get_new_pocket_ic_env_with_service_canisters_provisioned;
 use test_utils::setup::test_constants::{

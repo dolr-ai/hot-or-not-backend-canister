@@ -171,7 +171,10 @@ fn test_increment_request_count_v1_with_payment() {
 
     // Paid requests don't increment user count, so status might be None or count is 0
     if let Some(status) = status {
-        assert_eq!(status.request_count, 0, "Paid requests should not increment user count");
+        assert_eq!(
+            status.request_count, 0,
+            "Paid requests should not increment user count"
+        );
     }
 
     // Try another paid request with different amount
@@ -207,7 +210,10 @@ fn test_increment_request_count_v1_with_payment() {
 
     // User count should still be 0 as both were paid requests
     if let Some(status) = status {
-        assert_eq!(status.request_count, 0, "Paid requests should not increment user count");
+        assert_eq!(
+            status.request_count, 0,
+            "Paid requests should not increment user count"
+        );
     }
 }
 
@@ -235,12 +241,12 @@ fn test_increment_request_count_v1_mixed_paid_unpaid() {
     }
 
     // Mix of paid and unpaid requests
-    let test_cases = vec![
-        (false, None, "unpaid request 1", 1),  // Should increment count to 1
-        (true, Some("50".to_string()), "paid request 1", 1),  // Paid, count stays 1
-        (false, None, "unpaid request 2", 2),  // Should increment count to 2
-        (true, Some("100".to_string()), "paid request 2", 2),  // Paid, count stays 2
-        (false, None, "unpaid request 3", 3),  // Should increment count to 3
+    let test_cases = [
+        (false, None, "unpaid request 1", 1), // Should increment count to 1
+        (true, Some("50".to_string()), "paid request 1", 1), // Paid, count stays 1
+        (false, None, "unpaid request 2", 2), // Should increment count to 2
+        (true, Some("100".to_string()), "paid request 2", 2), // Paid, count stays 2
+        (false, None, "unpaid request 3", 3), // Should increment count to 3
     ];
 
     for (is_paid, payment_amount, description, expected_count) in test_cases.iter() {
@@ -257,14 +263,15 @@ fn test_increment_request_count_v1_mixed_paid_unpaid() {
                 payment_amount.clone(),
             ),
         )
-        .expect(&format!("Failed to increment for {}", description));
+        .unwrap_or_else(|_| panic!("Failed to increment for {}", description));
 
         match result {
             RateLimitResult::Ok(msg) => {
                 println!("{}: {}", description, msg);
                 // Check for both possible success messages
                 assert!(
-                    msg.contains("Request count incremented") || msg.contains("Paid request processed"),
+                    msg.contains("Request count incremented")
+                        || msg.contains("Paid request processed"),
                     "Expected success message, got: {}",
                     msg
                 );
@@ -284,11 +291,9 @@ fn test_increment_request_count_v1_mixed_paid_unpaid() {
         .expect("Expected status");
 
         assert_eq!(
-            status.request_count,
-            *expected_count as u64,
+            status.request_count, *expected_count as u64,
             "Expected count {} after {}",
-            expected_count,
-            description
+            expected_count, description
         );
     }
 }
@@ -317,7 +322,7 @@ fn test_increment_request_count_v1_different_payment_amounts() {
     }
 
     // Test different payment amounts - all paid requests
-    let payment_amounts = vec!["10", "50", "100", "500", "1000"];
+    let payment_amounts = ["10", "50", "100", "500", "1000"];
 
     for amount in payment_amounts.iter() {
         let result = update::<_, RateLimitResult>(
@@ -333,7 +338,7 @@ fn test_increment_request_count_v1_different_payment_amounts() {
                 Some(amount.to_string()),
             ),
         )
-        .expect(&format!("Failed to increment with payment amount {}", amount));
+        .unwrap_or_else(|_| panic!("Failed to increment with payment amount {}", amount));
 
         match result {
             RateLimitResult::Ok(msg) => {
@@ -356,8 +361,7 @@ fn test_increment_request_count_v1_different_payment_amounts() {
         // All requests are paid, so user count should remain 0
         if let Some(status) = status {
             assert_eq!(
-                status.request_count,
-                0,
+                status.request_count, 0,
                 "Paid requests should not increment user count (amount: {})",
                 amount
             );

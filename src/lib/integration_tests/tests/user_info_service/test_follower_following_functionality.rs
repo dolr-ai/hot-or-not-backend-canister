@@ -176,11 +176,17 @@ fn test_comprehensive_follower_following_functionality() {
         "Alice should have 2 followers"
     );
     assert!(
-        alice_followers.followers.iter().any(|f| f.principal_id == bob),
+        alice_followers
+            .followers
+            .iter()
+            .any(|f| f.principal_id == bob),
         "Bob should be in Alice's followers"
     );
     assert!(
-        alice_followers.followers.iter().any(|f| f.principal_id == charlie),
+        alice_followers
+            .followers
+            .iter()
+            .any(|f| f.principal_id == charlie),
         "Charlie should be in Alice's followers"
     );
 
@@ -197,7 +203,10 @@ fn test_comprehensive_follower_following_functionality() {
 
     assert_eq!(bob_followers.total_count, 1, "Bob should have 1 follower");
     assert!(
-        bob_followers.followers.iter().any(|f| f.principal_id == alice),
+        bob_followers
+            .followers
+            .iter()
+            .any(|f| f.principal_id == alice),
         "Alice should be in Bob's followers"
     );
 
@@ -217,7 +226,10 @@ fn test_comprehensive_follower_following_functionality() {
         "Charlie should have 1 follower"
     );
     assert!(
-        charlie_followers.followers.iter().any(|f| f.principal_id == alice),
+        charlie_followers
+            .followers
+            .iter()
+            .any(|f| f.principal_id == alice),
         "Alice should be in Charlie's followers"
     );
 
@@ -234,7 +246,10 @@ fn test_comprehensive_follower_following_functionality() {
 
     assert_eq!(dan_followers.total_count, 1, "Dan should have 1 follower");
     assert!(
-        dan_followers.followers.iter().any(|f| f.principal_id == charlie),
+        dan_followers
+            .followers
+            .iter()
+            .any(|f| f.principal_id == charlie),
         "Charlie should be in Dan's followers"
     );
 
@@ -256,11 +271,17 @@ fn test_comprehensive_follower_following_functionality() {
         "Alice should be following 2 users"
     );
     assert!(
-        alice_following.following.iter().any(|f| f.principal_id == bob),
+        alice_following
+            .following
+            .iter()
+            .any(|f| f.principal_id == bob),
         "Alice should be following Bob"
     );
     assert!(
-        alice_following.following.iter().any(|f| f.principal_id == charlie),
+        alice_following
+            .following
+            .iter()
+            .any(|f| f.principal_id == charlie),
         "Alice should be following Charlie"
     );
 
@@ -280,7 +301,10 @@ fn test_comprehensive_follower_following_functionality() {
         "Bob should be following 1 user"
     );
     assert!(
-        bob_following.following.iter().any(|f| f.principal_id == alice),
+        bob_following
+            .following
+            .iter()
+            .any(|f| f.principal_id == alice),
         "Bob should be following Alice"
     );
 
@@ -300,11 +324,17 @@ fn test_comprehensive_follower_following_functionality() {
         "Charlie should be following 2 users"
     );
     assert!(
-        charlie_following.following.iter().any(|f| f.principal_id == alice),
+        charlie_following
+            .following
+            .iter()
+            .any(|f| f.principal_id == alice),
         "Charlie should be following Alice"
     );
     assert!(
-        charlie_following.following.iter().any(|f| f.principal_id == dan),
+        charlie_following
+            .following
+            .iter()
+            .any(|f| f.principal_id == dan),
         "Charlie should be following Dan"
     );
 
@@ -356,8 +386,14 @@ fn test_comprehensive_follower_following_functionality() {
     );
 
     // Test pagination with cursor - get second page using cursor
-    println!("First page followers: {:?}", alice_followers_page1.followers);
-    println!("Next cursor from first page: {:?}", alice_followers_page1.next_cursor);
+    println!(
+        "First page followers: {:?}",
+        alice_followers_page1.followers
+    );
+    println!(
+        "Next cursor from first page: {:?}",
+        alice_followers_page1.next_cursor
+    );
 
     let alice_followers_page2 = query::<_, Result<FollowersResponse, String>>(
         &pocket_ic,
@@ -369,8 +405,14 @@ fn test_comprehensive_follower_following_functionality() {
     .expect("Failed to query followers")
     .expect("Failed to get Alice's followers page 2");
 
-    println!("Second page followers: {:?}", alice_followers_page2.followers);
-    println!("Next cursor from second page: {:?}", alice_followers_page2.next_cursor);
+    println!(
+        "Second page followers: {:?}",
+        alice_followers_page2.followers
+    );
+    println!(
+        "Next cursor from second page: {:?}",
+        alice_followers_page2.next_cursor
+    );
 
     assert_eq!(
         alice_followers_page2.followers.len(),
@@ -463,11 +505,17 @@ fn test_comprehensive_follower_following_functionality() {
         "Alice should have 1 follower after unfollows"
     );
     assert!(
-        alice_followers_final.followers.iter().any(|f| f.principal_id == bob),
+        alice_followers_final
+            .followers
+            .iter()
+            .any(|f| f.principal_id == bob),
         "Bob should still be in Alice's followers"
     );
     assert!(
-        !alice_followers_final.followers.iter().any(|f| f.principal_id == charlie),
+        !alice_followers_final
+            .followers
+            .iter()
+            .any(|f| f.principal_id == charlie),
         "Charlie should not be in Alice's followers"
     );
 
@@ -487,11 +535,17 @@ fn test_comprehensive_follower_following_functionality() {
         "Alice should be following 1 user after unfollows"
     );
     assert!(
-        !alice_following_final.following.iter().any(|f| f.principal_id == bob),
+        !alice_following_final
+            .following
+            .iter()
+            .any(|f| f.principal_id == bob),
         "Alice should not be following Bob"
     );
     assert!(
-        alice_following_final.following.iter().any(|f| f.principal_id == charlie),
+        alice_following_final
+            .following
+            .iter()
+            .any(|f| f.principal_id == charlie),
         "Alice should still be following Charlie"
     );
 
@@ -531,11 +585,17 @@ fn test_comprehensive_follower_following_functionality() {
         "Charlie should be following 1 user after unfollows"
     );
     assert!(
-        !charlie_following_final.following.iter().any(|f| f.principal_id == alice),
+        !charlie_following_final
+            .following
+            .iter()
+            .any(|f| f.principal_id == alice),
         "Charlie should not be following Alice"
     );
     assert!(
-        charlie_following_final.following.iter().any(|f| f.principal_id == dan),
+        charlie_following_final
+            .following
+            .iter()
+            .any(|f| f.principal_id == dan),
         "Charlie should still be following Dan"
     );
 
@@ -649,7 +709,8 @@ fn test_comprehensive_follower_following_functionality() {
     .expect("Failed to get Bob's profile from Alice");
 
     assert_eq!(
-        bob_profile_from_alice.caller_follows_user, Some(true),
+        bob_profile_from_alice.caller_follows_user,
+        Some(true),
         "Alice is following Bob, so caller_follows_user should be Some(true)"
     );
 
@@ -665,11 +726,14 @@ fn test_comprehensive_follower_following_functionality() {
     .expect("Failed to get Charlie's profile from Bob");
 
     assert_eq!(
-        charlie_profile_from_bob.caller_follows_user, Some(false),
+        charlie_profile_from_bob.caller_follows_user,
+        Some(false),
         "Bob is not following Charlie, so caller_follows_user should be Some(false)"
     );
 
-    println!("✅ Profile details v4 follower/following counts and caller_follows_user field verified!");
+    println!(
+        "✅ Profile details v4 follower/following counts and caller_follows_user field verified!"
+    );
 
     // Test profile pictures in follower/following lists
     println!("\n🖼️ Testing profile pictures in follower/following lists...");
@@ -689,7 +753,11 @@ fn test_comprehensive_follower_following_functionality() {
         (alice_profile_update,),
     )
     .expect("Failed to update Alice's profile");
-    assert!(result.is_ok(), "Failed to update Alice's profile: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "Failed to update Alice's profile: {:?}",
+        result
+    );
 
     // Update Bob's profile picture
     let bob_profile_update = ProfileUpdateDetails {
@@ -706,7 +774,11 @@ fn test_comprehensive_follower_following_functionality() {
         (bob_profile_update,),
     )
     .expect("Failed to update Bob's profile");
-    assert!(result.is_ok(), "Failed to update Bob's profile: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "Failed to update Bob's profile: {:?}",
+        result
+    );
 
     // Update Charlie's profile picture
     let charlie_profile_update = ProfileUpdateDetails {
@@ -723,7 +795,11 @@ fn test_comprehensive_follower_following_functionality() {
         (charlie_profile_update,),
     )
     .expect("Failed to update Charlie's profile");
-    assert!(result.is_ok(), "Failed to update Charlie's profile: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "Failed to update Charlie's profile: {:?}",
+        result
+    );
 
     // Test get_followers WITHOUT profile pictures (default behavior)
     println!("\n📋 Testing get_followers without profile pictures...");
@@ -837,7 +913,7 @@ fn test_comprehensive_follower_following_functionality() {
 
     // Test with a user who has no profile picture set
     println!("\n📋 Testing user without profile picture...");
-    let dan_followers_with_pics = query::<_, Result<FollowersResponse, String>>(
+    let _dan_followers_with_pics = query::<_, Result<FollowersResponse, String>>(
         &pocket_ic,
         user_service_canister,
         dan,

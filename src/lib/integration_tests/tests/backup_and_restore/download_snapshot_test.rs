@@ -1,13 +1,11 @@
 use candid::{Encode, Principal};
-use pocket_ic::{PocketIc, WasmResult};
+use pocket_ic::WasmResult;
 use shared_utils::{
     canister_specific::platform_orchestrator::types::args::PlatformOrchestratorInitArgs,
-    common::types::known_principal::KnownPrincipalType,
-    constant::RECLAIM_CANISTER_PRINCIPAL_ID,
+    common::types::known_principal::KnownPrincipalType, constant::RECLAIM_CANISTER_PRINCIPAL_ID,
 };
 use test_utils::setup::{
-    env::pocket_ic_env::get_new_pocket_ic_env,
-    test_constants::get_mock_user_charlie_principal_id,
+    env::pocket_ic_env::get_new_pocket_ic_env, test_constants::get_mock_user_charlie_principal_id,
 };
 
 #[test]
@@ -52,7 +50,7 @@ fn all_canister_snapshot_tests() {
         })
         .unwrap();
 
-    for i in 0..50 {
+    for _i in 0..50 {
         pocket_ic.tick();
     }
 
@@ -69,7 +67,7 @@ fn all_canister_snapshot_tests() {
             Some(super_admin),
         )
         .unwrap();
-    for i in 0..20 {
+    for _i in 0..20 {
         pocket_ic.tick();
     }
 

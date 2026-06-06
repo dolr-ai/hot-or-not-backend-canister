@@ -1,11 +1,7 @@
-use pocket_ic::PocketIc;
 use shared_utils::canister_specific::individual_user_template::types::profile::UserProfileDetailsForFrontendV3;
-use shared_utils::constant::get_global_super_admin_principal_id_v1;
 use test_utils::canister_calls::{query, update};
 use test_utils::setup::env::pocket_ic_env::get_new_pocket_ic_env_with_service_canisters_provisioned;
-use test_utils::setup::test_constants::{
-    get_global_super_admin_principal_id, get_mock_user_charlie_principal_id,
-};
+use test_utils::setup::test_constants::get_mock_user_charlie_principal_id;
 
 #[test]
 fn test_registration_of_new_users() {

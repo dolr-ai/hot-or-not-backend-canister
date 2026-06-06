@@ -1,16 +1,9 @@
-use std::{
-    collections::{HashMap, HashSet},
-    time::{Duration, SystemTime},
-};
+use std::time::{Duration, SystemTime};
 
-use candid::{encode_one, CandidType, Principal};
-use ic_cdk::api::management_canister::main::CanisterId;
-use ic_ledger_types::{BlockIndex, Tokens};
+use candid::{encode_one, Principal};
 use pocket_ic::WasmResult;
 use shared_utils::{
-    canister_specific::
-        platform_orchestrator::types::args::PlatformOrchestratorInitArgs
-    ,
+    canister_specific::platform_orchestrator::types::args::PlatformOrchestratorInitArgs,
     common::types::known_principal::KnownPrincipalType,
 };
 use test_utils::setup::{
@@ -21,44 +14,11 @@ use test_utils::setup::{
     },
 };
 
-const INDIVIDUAL_TEMPLATE_WASM_PATH: &str =
-    "../../../target/wasm32-unknown-unknown/release/individual_user_template.wasm.gz";
-const USER_INDEX_WASM_PATH: &str =
-    "../../../target/wasm32-unknown-unknown/release/user_index.wasm.gz";
 const PF_ORCH_WASM_PATH: &str =
     "../../../target/wasm32-unknown-unknown/release/platform_orchestrator.wasm.gz";
 
-fn individual_template_canister_wasm() -> Vec<u8> {
-    std::fs::read(INDIVIDUAL_TEMPLATE_WASM_PATH).unwrap()
-}
-
-fn user_index_canister_wasm() -> Vec<u8> {
-    std::fs::read(USER_INDEX_WASM_PATH).unwrap()
-}
 fn pf_orch_canister_wasm() -> Vec<u8> {
     std::fs::read(PF_ORCH_WASM_PATH).unwrap()
-}
-
-#[derive(CandidType)]
-struct CyclesMintingCanisterInitPayload {
-    ledger_canister_id: CanisterId,
-    governance_canister_id: CanisterId,
-    minting_account_id: Option<String>,
-    last_purged_notification: Option<BlockIndex>,
-}
-
-#[derive(CandidType)]
-struct AuthorizedSubnetWorks {
-    who: Option<Principal>,
-    subnets: Vec<Principal>,
-}
-
-#[derive(CandidType)]
-struct NnsLedgerCanisterInitPayload {
-    minting_account: String,
-    initial_values: HashMap<String, Tokens>,
-    send_whitelist: HashSet<CanisterId>,
-    transfer_fee: Option<Tokens>,
 }
 
 // TODO: remove this when removing the update_last_access_time API from PF Orch

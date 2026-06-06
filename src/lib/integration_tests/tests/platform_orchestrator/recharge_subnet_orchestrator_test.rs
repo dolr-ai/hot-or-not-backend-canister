@@ -31,7 +31,7 @@ pub fn recharge_subnet_orchestrator_test() {
         )
         .unwrap();
 
-    let _register_new_subnet_orchestrator_res = pocket_ic
+    pocket_ic
         .update_call(
             platform_orchestrator_canister_id,
             global_admin_principal,

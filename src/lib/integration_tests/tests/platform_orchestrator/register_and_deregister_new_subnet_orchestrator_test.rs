@@ -34,7 +34,7 @@ fn register_subnet_orchestrator_with_platform_orchestrator_test() {
         )
         .unwrap();
 
-    let subnet_orchestrator_canister_id: Principal = pocket_ic
+    pocket_ic
         .update_call(
             platform_canister_id,
             charlie_global_admin,
@@ -50,7 +50,7 @@ fn register_subnet_orchestrator_with_platform_orchestrator_test() {
         })
         .unwrap();
 
-    for i in 0..110 {
+    for _i in 0..110 {
         pocket_ic.tick();
     }
 
@@ -260,7 +260,7 @@ fn deregister_subnet_orchestrator_from_platform_orchestrator() {
         })
         .unwrap();
 
-    let deregister_new_subnet_orchestrator_res = pocket_ic
+    pocket_ic
         .update_call(
             platform_canister_id,
             charlie_global_admin,
@@ -318,7 +318,7 @@ fn deregister_subnet_orchestrator_from_platform_orchestrator() {
 
     assert!(all_subnet_orchestrator.contains(&subnet_orchestrator_canister_id));
 
-    let deregister_new_subnet_orchestrator_res = pocket_ic
+    pocket_ic
         .update_call(
             platform_canister_id,
             charlie_global_admin,

@@ -55,7 +55,7 @@ fn provision_subnet_orchestrator_canister() {
         })
         .unwrap();
 
-    for i in 0..110 {
+    for _i in 0..110 {
         pocket_ic.tick();
     }
 
@@ -102,7 +102,7 @@ fn provision_subnet_orchestrator_canister() {
     );
 
     //check if upgrades for individual_canisters_work_fine
-    let result = pocket_ic
+    pocket_ic
         .update_call(
             platform_canister_id,
             super_admin,
@@ -124,7 +124,7 @@ fn provision_subnet_orchestrator_canister() {
         .unwrap()
         .unwrap();
 
-    for i in 0..150 {
+    for _i in 0..150 {
         pocket_ic.tick();
     }
 
@@ -165,7 +165,7 @@ fn provision_subnet_orchestrator_canister() {
         })
         .unwrap();
 
-    assert!(upgrade_report.subnet_wise_report.len() > 0);
+    assert!(!upgrade_report.subnet_wise_report.is_empty());
     assert_eq!(
         upgrade_report
             .subnet_wise_report

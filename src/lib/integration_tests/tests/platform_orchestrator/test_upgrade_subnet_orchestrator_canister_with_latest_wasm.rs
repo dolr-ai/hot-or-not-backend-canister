@@ -1,8 +1,6 @@
 use candid::Principal;
 use pocket_ic::WasmResult;
-use shared_utils::{
-    canister_specific::platform_orchestrator, common::types::known_principal::KnownPrincipalType,
-};
+use shared_utils::common::types::known_principal::KnownPrincipalType;
 use test_utils::setup::{
     env::pocket_ic_env::get_new_pocket_ic_env, test_constants::get_mock_user_charlie_principal_id,
 };

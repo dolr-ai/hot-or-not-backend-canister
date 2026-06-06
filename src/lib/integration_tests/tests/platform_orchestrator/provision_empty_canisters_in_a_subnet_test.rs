@@ -50,7 +50,7 @@ fn provision_empty_canisters_in_a_subnet_test() {
         })
         .unwrap();
 
-    for i in 0..130 {
+    for _i in 0..130 {
         pocket_ic.tick();
     }
 
@@ -92,7 +92,7 @@ fn provision_empty_canisters_in_a_subnet_test() {
         .unwrap()
         .unwrap();
 
-    for _ in 0..110 {
+    for _i in 0..110 {
         pocket_ic.tick();
     }
 
