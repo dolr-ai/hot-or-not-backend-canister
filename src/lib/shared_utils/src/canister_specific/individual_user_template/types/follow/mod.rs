@@ -2,8 +2,6 @@ use std::collections::{BTreeMap, HashMap};
 
 use candid::{CandidType, Deserialize, Principal};
 use serde::Serialize;
-use serde_json_any_key::*;
-
 #[derive(Default, Serialize, Deserialize, Clone)]
 pub struct FollowData {
     pub follower: FollowList,

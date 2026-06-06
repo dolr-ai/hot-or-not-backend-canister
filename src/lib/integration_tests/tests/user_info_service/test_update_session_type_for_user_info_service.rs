@@ -1,4 +1,3 @@
-use pocket_ic::PocketIc;
 use shared_utils::canister_specific::individual_user_template::types::session::SessionType;
 use test_utils::canister_calls::{query, update};
 use test_utils::setup::env::pocket_ic_env::get_new_pocket_ic_env_with_service_canisters_provisioned;
@@ -103,7 +102,7 @@ fn test_update_session_type_for_user_info_service() {
     assert_eq!(updated_session_type, SessionType::RegisteredSession);
 
     // Try to update back to AnonymousSession (should fail due to business logic)
-    let downgrade_result = update::<_, Result<(), String>>(
+    let _downgrade_result = update::<_, Result<(), String>>(
         &pocket_ic,
         user_info_service_canister,
         global_admin,

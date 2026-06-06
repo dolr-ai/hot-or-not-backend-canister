@@ -8,7 +8,10 @@ use shared_utils::canister_specific::user_post_service::types::{
     storage::{Post, PostViewDetailsFromFrontend, PostViewStatistics},
 };
 use shared_utils::common::types::top_posts::post_score_index_item::PostStatus;
-use std::{collections::HashSet, time::{Duration, SystemTime}};
+use std::{
+    collections::HashSet,
+    time::{Duration, SystemTime},
+};
 use test_utils::{
     canister_calls::{query, update},
     setup::{
@@ -578,7 +581,7 @@ fn test_update_post_toggle_like_status_by_caller() {
     )
     .unwrap();
 
-    assert_eq!(liked.unwrap(), true);
+    assert!(liked.unwrap());
 
     // Verify the post has the like
     let post: Result<Post, UserPostServiceError> = query(
@@ -604,7 +607,7 @@ fn test_update_post_toggle_like_status_by_caller() {
     )
     .unwrap();
 
-    assert_eq!(liked.unwrap(), false);
+    assert!(!liked.unwrap());
 
     // Verify the like is removed
     let post: Result<Post, UserPostServiceError> = query(
@@ -646,7 +649,7 @@ fn test_update_post_toggle_like_status_multiple_users() {
         ("multi_like_test_post",),
     )
     .unwrap();
-    assert_eq!(liked.unwrap(), true);
+    assert!(liked.unwrap());
 
     // Charlie likes the post
     let liked: Result<bool, UserPostServiceError> = update(
@@ -657,7 +660,7 @@ fn test_update_post_toggle_like_status_multiple_users() {
         ("multi_like_test_post",),
     )
     .unwrap();
-    assert_eq!(liked.unwrap(), true);
+    assert!(liked.unwrap());
 
     // Alice likes her own post
     let liked: Result<bool, UserPostServiceError> = update(
@@ -668,7 +671,7 @@ fn test_update_post_toggle_like_status_multiple_users() {
         ("multi_like_test_post",),
     )
     .unwrap();
-    assert_eq!(liked.unwrap(), true);
+    assert!(liked.unwrap());
 
     // Verify all likes are present
     let post: Result<Post, UserPostServiceError> = query(
@@ -849,7 +852,7 @@ fn test_get_individual_post_details_by_id_for_user_success() {
         vec!["test".to_string(), "integration".to_string()]
     );
     assert_eq!(post_details.like_count, 0);
-    assert_eq!(post_details.liked_by_me, false);
+    assert!(!post_details.liked_by_me);
 
     // Get post details as Bob (different user)
     let result: Result<PostDetailsForFrontend, UserPostServiceError> = query(
@@ -871,7 +874,7 @@ fn test_get_individual_post_details_by_id_for_user_success() {
         vec!["test".to_string(), "integration".to_string()]
     );
     assert_eq!(post_details.like_count, 0);
-    assert_eq!(post_details.liked_by_me, false);
+    assert!(!post_details.liked_by_me);
 }
 
 #[test]
@@ -931,7 +934,7 @@ fn test_get_individual_post_details_by_id_for_user_with_likes() {
 
     let post_details = result.unwrap();
     assert_eq!(post_details.like_count, 1);
-    assert_eq!(post_details.liked_by_me, true);
+    assert!(post_details.liked_by_me);
 
     // Get post details as Alice
     let result: Result<PostDetailsForFrontend, UserPostServiceError> = query(
@@ -945,7 +948,7 @@ fn test_get_individual_post_details_by_id_for_user_with_likes() {
 
     let post_details = result.unwrap();
     assert_eq!(post_details.like_count, 1);
-    assert_eq!(post_details.liked_by_me, false);
+    assert!(!post_details.liked_by_me);
 }
 
 #[test]

@@ -101,9 +101,10 @@ async fn harvest_canister(
         .await?;
 
     // Decode Result<ControlledCanisterDetails, Text>
-    let details: (Result<ControlledCanisterDetails, String>,) =
+    // NOTE: PO method returns the Result variant directly (no outer 1-tuple in the reply bytes).
+    let details: Result<ControlledCanisterDetails, String> =
         candid::decode_one(&response).map_err(|e| anyhow::anyhow!("failed to decode canister status: {}", e))?;
-    let details = details.0.map_err(|e| anyhow::anyhow!("get_controllers_and_cycle_balance returned error: {}", e))?;
+    let details = details.map_err(|e| anyhow::anyhow!("get_controllers_and_cycle_balance returned error: {}", e))?;
 
     let pre_balance = details.cycle_balance;
     let pre_reserved = details.reserved_cycles;
@@ -157,9 +158,9 @@ async fn harvest_canister(
         .call_and_wait()
         .await?;
 
-    let details: (Result<ControlledCanisterDetails, String>,) =
+    let details: Result<ControlledCanisterDetails, String> =
         candid::decode_one(&response).map_err(|e| anyhow::anyhow!("failed to decode post-uninstall status: {}", e))?;
-    let details = details.0.map_err(|e| anyhow::anyhow!("get_controllers_and_cycle_balance returned error: {}", e))?;
+    let details = details.map_err(|e| anyhow::anyhow!("get_controllers_and_cycle_balance returned error: {}", e))?;
     let post_uninstall_balance = details.cycle_balance;
 
     println!(
@@ -282,9 +283,9 @@ async fn harvest_canister(
         .call_and_wait()
         .await?;
 
-    let details: (Result<ControlledCanisterDetails, String>,) =
+    let details: Result<ControlledCanisterDetails, String> =
         candid::decode_one(&response).map_err(|e| anyhow::anyhow!("failed to decode final status: {}", e))?;
-    let details = details.0.map_err(|e| anyhow::anyhow!("get_controllers_and_cycle_balance returned error: {}", e))?;
+    let details = details.map_err(|e| anyhow::anyhow!("get_controllers_and_cycle_balance returned error: {}", e))?;
 
     // Validate controllers are [PO] only.
     if details.controllers.len() != 1 || details.controllers[0] != po {

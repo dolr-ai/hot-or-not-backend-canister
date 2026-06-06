@@ -76,7 +76,7 @@ fn test_change_subscription_plan_from_free_to_pro() {
         user_service_canister,
         admin_principal,
         "change_subscription_plan",
-        (user_principal, new_pro_plan.clone()),
+        (user_principal, new_pro_plan),
     )
     .expect("Failed to change subscription plan");
 
@@ -714,7 +714,7 @@ fn test_bot_inherits_parent_subscription_plan() {
         user_service_canister,
         admin_principal,
         "change_subscription_plan",
-        (parent_principal, pro_plan.clone()),
+        (parent_principal, pro_plan),
     )
     .expect("Failed to change parent subscription plan");
 
@@ -781,7 +781,7 @@ fn test_change_subscription_plan_for_bot_updates_parent() {
         user_service_canister,
         admin_principal,
         "change_subscription_plan",
-        (bot_principal, pro_plan.clone()),
+        (bot_principal, pro_plan),
     )
     .expect("Failed to change bot subscription plan");
 

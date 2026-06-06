@@ -1,15 +1,10 @@
-use std::ops::Add;
-
 use candid::{CandidType, Nat};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    common::{
-        types::utility_token::token_event::{
-            HotOrNotOutcomePayoutEvent, MintEvent, PumpDumpOutcomePayoutEvent, StakeEvent,
-            TokenEvent, WithdrawEvent, HOT_OR_NOT_BET_CREATOR_COMMISSION_PERCENTAGE,
-        },
-        utils::default_pump_dump_onboarding_reward,
+    common::types::utility_token::token_event::{
+        HotOrNotOutcomePayoutEvent, MintEvent, PumpDumpOutcomePayoutEvent, StakeEvent, TokenEvent,
+        WithdrawEvent, HOT_OR_NOT_BET_CREATOR_COMMISSION_PERCENTAGE,
     },
     constant::GDOLLR_TO_E8S,
 };
@@ -121,9 +116,9 @@ impl TokenTransactions for CentsToken {
                     self.balance += bet_amount as u128;
                 }
                 StakeEvent::BetOnPumpDump {
-                    pumps,
-                    dumps,
-                    root_canister_id,
+                    pumps: _pumps,
+                    dumps: _dumps,
+                    root_canister_id: _root_canister_id,
                 } => {
                     self.balance -= amount as u128;
                 }
@@ -179,7 +174,6 @@ mod test {
         canister_specific::individual_user_template::types::pump_n_dump::{
             GameDirection, ParticipatedGameInfo,
         },
-        common::utils::default_pump_dump_onboarding_reward,
         constant::GDOLLR_TO_E8S,
     };
 
