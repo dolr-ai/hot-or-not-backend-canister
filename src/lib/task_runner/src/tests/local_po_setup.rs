@@ -8,7 +8,7 @@
 ///   surface needed for cycle harvesting (add_our_identity_as_controller,
 ///   get_controllers_and_cycle_balance, get_version, return_cycle_balance_..., etc.).
 /// - The old deploy script called removed methods such as `upload_wasms`, producing:
-///     "Error: The replica returned a rejection error: ... Canister has no update method 'upload_wasms'."
+///   "Error: The replica returned a rejection error: ... Canister has no update method 'upload_wasms'."
 /// - All orchestration logic now lives in Rust (task_runner), is versioned with the
 ///   code, type-checked where possible, and runnable via `cargo test -- --ignored`.
 ///
@@ -68,9 +68,10 @@ use crate::agent::{local_agent_from_pem, workspace_root};
 /// - It never calls `harvest_canister`, `harvest_single_canister`, or anything
 ///   that populates `po_controlled_canisters` / `cycle_harvested` / `pending_harvests`.
 ///
-/// The local PO ID (e.g. uqqxf-...) and the test target (e.g. the canister
-/// created as "test_individual") exist **only** on the ephemeral local dfx
-/// replica started by this test. They are never inserted into SQLite.
+/// The local PO ID (e.g. uxrrr-...) and the test target (the canister created
+/// under the "individual_user_template" dfx.json entry as a stand-in) exist
+/// **only** on the ephemeral local dfx replica started by this test.
+/// They are never inserted into SQLite.
 ///
 /// If in the future you extend this test (or a new test) to actually exercise
 /// the harvester logic against a local PO, you **must** either:
@@ -81,7 +82,6 @@ use crate::agent::{local_agent_from_pem, workspace_root};
 ///
 /// We also actively assert below (via mtime) that the real DB file is not
 /// modified by this test run.
-
 /// Small duplicated view of the PO return type so we don't have to make the
 /// cycle_harvest structs public just for this setup test. Keep in sync with
 /// the real definition in cycle_harvest.rs.
@@ -169,13 +169,23 @@ async fn setup_local_po_and_validate_harvest_methods() -> Result<()> {
     println!("==> [3/10] Waiting for local replica to become healthy (short-poll, max ~60s) ...");
     let mut healthy = false;
     for attempt in 0..30 {
+        // NOTE: dfx ping takes the network name as a *positional* argument (not --network).
+        // Using `dfx ping local` (or just `dfx ping` for the default local network).
         let output = Command::new("dfx")
-            .args(["ping", "--network", "local"])
+            .args(["ping", "local"])
             .current_dir(&root)
             .output();
         if let Ok(out) = output {
+            // A successful exit status from dfx ping means the replica is reachable and responsive.
+            // We also accept common success strings for older/newer dfx output variations.
             let stdout = String::from_utf8_lossy(&out.stdout);
-            if out.status.success() && (stdout.contains("replica") || stdout.contains("healthy")) {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            if out.status.success()
+                || stdout.contains("replica")
+                || stdout.contains("healthy")
+                || stdout.contains("Pinged")
+                || stderr.contains("replica")
+            {
                 healthy = true;
                 println!("  ✓ replica healthy after {} attempts", attempt + 1);
                 break;
@@ -186,7 +196,10 @@ async fn setup_local_po_and_validate_harvest_methods() -> Result<()> {
         }
         sleep(Duration::from_secs(2)).await;
     }
-    anyhow::ensure!(healthy, "local replica did not report healthy within timeout — check `dfx ping --network local` manually");
+    anyhow::ensure!(
+        healthy,
+        "local replica did not report healthy within timeout — check `dfx ping local` manually"
+    );
 
     println!("==> [4/10] Deploying current platform_orchestrator (local) ...");
     let status = Command::new("dfx")
@@ -252,12 +265,16 @@ async fn setup_local_po_and_validate_harvest_methods() -> Result<()> {
         "failed to add actions principal as controller of local PO"
     );
 
+    // We use "individual_user_template" (a real entry that exists in this project's dfx.json)
+    // as the stand-in target canister. We only create the canister + manipulate controllers;
+    // we never deploy the template wasm in this test. This is sufficient to exercise the
+    // PO's get_controllers_and_cycle_balance + add_our_identity_as_controller paths.
     println!("==> [6/10] Creating a fresh test target canister (stand-in for a po_controlled_canister) ...");
     let status = Command::new("dfx")
         .args([
             "canister",
             "create",
-            "test_individual",
+            "individual_user_template",
             "--network",
             "local",
             "--with-cycles",
@@ -265,17 +282,26 @@ async fn setup_local_po_and_validate_harvest_methods() -> Result<()> {
         ])
         .current_dir(&root)
         .status()
-        .context("dfx canister create test_individual failed to spawn")?;
-    anyhow::ensure!(status.success(), "failed to create test_individual target");
+        .context("dfx canister create individual_user_template (as test target) failed to spawn")?;
+    anyhow::ensure!(
+        status.success(),
+        "failed to create individual_user_template target (stand-in)"
+    );
 
     let target_id_output = Command::new("dfx")
-        .args(["canister", "id", "test_individual", "--network", "local"])
+        .args([
+            "canister",
+            "id",
+            "individual_user_template",
+            "--network",
+            "local",
+        ])
         .current_dir(&root)
         .output()
-        .context("dfx canister id test_individual failed")?;
+        .context("dfx canister id individual_user_template (as test target) failed")?;
     anyhow::ensure!(
         target_id_output.status.success(),
-        "failed to get test_individual id"
+        "failed to get individual_user_template (test target) id"
     );
     let target_id_str = String::from_utf8(target_id_output.stdout)?
         .trim()
@@ -289,7 +315,7 @@ async fn setup_local_po_and_validate_harvest_methods() -> Result<()> {
         .args([
             "canister",
             "update-settings",
-            "test_individual",
+            "individual_user_template",
             "--add-controller",
             &po.to_string(),
             "--network",
@@ -310,8 +336,10 @@ async fn setup_local_po_and_validate_harvest_methods() -> Result<()> {
     println!("\n==> [9/10] Verifying the harvest methods the task_runner needs are present and callable on local PO {} ...", po);
 
     // --- get_version (simple query, no guard) ---
+    // Explicit empty arg for maximum compatibility with ic-cdk arg decoding on local replica.
     let version_bytes = agent
         .query(&po, "get_version")
+        .with_arg(Encode!()?)
         .call()
         .await
         .map_err(|e| anyhow::anyhow!("get_version query rejected: {}", e))?;

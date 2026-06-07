@@ -37,9 +37,7 @@ pub async fn receive_empty_canister_from_individual_canister(
         .await?;
 
     CANISTER_DATA.with_borrow_mut(|canister_data| {
-        canister_data
-            .backup_canister_pool
-            .extend(canister_ids.into_iter());
+        canister_data.backup_canister_pool.extend(canister_ids);
     });
 
     Ok(())

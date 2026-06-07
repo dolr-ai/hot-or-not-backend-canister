@@ -75,7 +75,7 @@ pub async fn set_permission_to_upgrade_individual_canisters(flag: bool) -> Strin
             .borrow_mut()
             .allow_upgrades_for_individual_canisters = flag;
     });
-    return "Success".to_string();
+    "Success".to_string()
 }
 
 #[query]

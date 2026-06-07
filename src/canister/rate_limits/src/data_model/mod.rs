@@ -137,15 +137,15 @@ impl CanisterData {
         self.rate_limits.insert(key, entry);
 
         // Then, increment the property-wide counter if configured
-        if let Some(prop_config) = self.property_configs.get(&property.to_string()) {
-            if prop_config.max_requests_per_property_all_users.is_some() {
-                let window_duration = prop_config
-                    .property_rate_limit_window_duration_seconds
-                    .unwrap_or(86400); // Default to 24 hours
+        if let Some(prop_config) = self.property_configs.get(&property.to_string())
+            && prop_config.max_requests_per_property_all_users.is_some()
+        {
+            let window_duration = prop_config
+                .property_rate_limit_window_duration_seconds
+                .unwrap_or(86400); // Default to 24 hours
 
-                let property_entry = if let Some(mut existing) =
-                    self.property_rate_limits.get(&property.to_string())
-                {
+            let property_entry =
+                if let Some(mut existing) = self.property_rate_limits.get(&property.to_string()) {
                     // Check if we need to reset the window
                     if current_time >= existing.window_start + window_duration {
                         RateLimitEntry {
@@ -165,9 +165,8 @@ impl CanisterData {
                     }
                 };
 
-                self.property_rate_limits
-                    .insert(property.to_string(), property_entry);
-            }
+            self.property_rate_limits
+                .insert(property.to_string(), property_entry);
         }
     }
 
@@ -194,21 +193,19 @@ impl CanisterData {
         }
 
         // Then, decrement the property-wide counter if configured
-        if let Some(prop_config) = self.property_configs.get(&property.to_string()) {
-            if prop_config.max_requests_per_property_all_users.is_some() {
-                let window_duration = prop_config
-                    .property_rate_limit_window_duration_seconds
-                    .unwrap_or(86400); // Default to 24 hours
+        if let Some(prop_config) = self.property_configs.get(&property.to_string())
+            && prop_config.max_requests_per_property_all_users.is_some()
+        {
+            let window_duration = prop_config
+                .property_rate_limit_window_duration_seconds
+                .unwrap_or(86400); // Default to 24 hours
 
-                if let Some(mut entry) = self.property_rate_limits.get(&property.to_string()) {
-                    // Only decrement if we're still within the same window and count is greater than 0
-                    if current_time < entry.window_start + window_duration
-                        && entry.request_count > 0
-                    {
-                        entry.request_count -= 1;
-                        self.property_rate_limits
-                            .insert(property.to_string(), entry);
-                    }
+            if let Some(mut entry) = self.property_rate_limits.get(&property.to_string()) {
+                // Only decrement if we're still within the same window and count is greater than 0
+                if current_time < entry.window_start + window_duration && entry.request_count > 0 {
+                    entry.request_count -= 1;
+                    self.property_rate_limits
+                        .insert(property.to_string(), entry);
                 }
             }
         }
@@ -239,7 +236,7 @@ impl CanisterData {
 
         let property_wide_limit_status = self.is_property_daily_rate_limited(property);
 
-        let user_rate_limit_entry = self.rate_limits.get(&key).unwrap_or(RateLimitEntry {
+        let _user_rate_limit_entry = self.rate_limits.get(&key).unwrap_or(RateLimitEntry {
             request_count: 0,
             window_start: current_time,
             config: None,
@@ -379,7 +376,7 @@ impl CanisterData {
     }
 
     pub fn get_property_config(&self, property: &str) -> Option<PropertyRateLimitConfig> {
-        self.property_configs.get(&property.to_string()).map(|c| c)
+        self.property_configs.get(&property.to_string())
     }
 
     pub fn remove_property_config(&mut self, property: &str) {
@@ -415,28 +412,28 @@ impl CanisterData {
 
     fn is_property_daily_rate_limited(&self, property: &str) -> RateLimitStatus {
         // First check if property has a property-wide limit configured
-        if let Some(prop_config) = self.property_configs.get(&property.to_string()) {
-            if let Some(property_limit) = prop_config.max_requests_per_property_all_users {
-                // Get the window duration (default to 24 hours if not specified)
-                let window_duration = prop_config
-                    .property_rate_limit_window_duration_seconds
-                    .unwrap_or(86400); // Default to 24 hours
+        if let Some(prop_config) = self.property_configs.get(&property.to_string())
+            && let Some(property_limit) = prop_config.max_requests_per_property_all_users
+        {
+            // Get the window duration (default to 24 hours if not specified)
+            let window_duration = prop_config
+                .property_rate_limit_window_duration_seconds
+                .unwrap_or(86400); // Default to 24 hours
 
-                let current_time = ic_cdk::api::time() / 1_000_000_000;
+            let current_time = ic_cdk::api::time() / 1_000_000_000;
 
-                if let Some(entry) = self.property_rate_limits.get(&property.to_string()) {
-                    // Check if we're still within the same window
-                    if current_time < entry.window_start + window_duration {
-                        // Within same window, check if limit exceeded
-                        return RateLimitStatus {
-                            principal: Principal::anonymous(),
-                            request_count: entry.request_count,
-                            window_start: entry.window_start,
-                            window_duration_seconds: window_duration,
-                            max_requests_per_window_per_user: 0,
-                            is_limited: entry.request_count >= property_limit,
-                        };
-                    }
+            if let Some(entry) = self.property_rate_limits.get(&property.to_string()) {
+                // Check if we're still within the same window
+                if current_time < entry.window_start + window_duration {
+                    // Within same window, check if limit exceeded
+                    return RateLimitStatus {
+                        principal: Principal::anonymous(),
+                        request_count: entry.request_count,
+                        window_start: entry.window_start,
+                        window_duration_seconds: window_duration,
+                        max_requests_per_window_per_user: 0,
+                        is_limited: entry.request_count >= property_limit,
+                    };
                 }
             }
         }
@@ -486,15 +483,15 @@ impl CanisterData {
         let current_time = ic_cdk::api::time() / 1_000_000_000;
 
         // Only increment the property-wide counter if configured
-        if let Some(prop_config) = self.property_configs.get(&property.to_string()) {
-            if prop_config.max_requests_per_property_all_users.is_some() {
-                let window_duration = prop_config
-                    .property_rate_limit_window_duration_seconds
-                    .unwrap_or(86400); // Default to 24 hours
+        if let Some(prop_config) = self.property_configs.get(&property.to_string())
+            && prop_config.max_requests_per_property_all_users.is_some()
+        {
+            let window_duration = prop_config
+                .property_rate_limit_window_duration_seconds
+                .unwrap_or(86400); // Default to 24 hours
 
-                let property_entry = if let Some(mut existing) =
-                    self.property_rate_limits.get(&property.to_string())
-                {
+            let property_entry =
+                if let Some(mut existing) = self.property_rate_limits.get(&property.to_string()) {
                     // Check if we need to reset the window
                     if current_time >= existing.window_start + window_duration {
                         RateLimitEntry {
@@ -514,9 +511,8 @@ impl CanisterData {
                     }
                 };
 
-                self.property_rate_limits
-                    .insert(property.to_string(), property_entry);
-            }
+            self.property_rate_limits
+                .insert(property.to_string(), property_entry);
         }
     }
 
@@ -525,21 +521,19 @@ impl CanisterData {
         let current_time = ic_cdk::api::time() / 1_000_000_000;
 
         // Only decrement the property-wide counter if configured
-        if let Some(prop_config) = self.property_configs.get(&property.to_string()) {
-            if prop_config.max_requests_per_property_all_users.is_some() {
-                let window_duration = prop_config
-                    .property_rate_limit_window_duration_seconds
-                    .unwrap_or(86400); // Default to 24 hours
+        if let Some(prop_config) = self.property_configs.get(&property.to_string())
+            && prop_config.max_requests_per_property_all_users.is_some()
+        {
+            let window_duration = prop_config
+                .property_rate_limit_window_duration_seconds
+                .unwrap_or(86400); // Default to 24 hours
 
-                if let Some(mut entry) = self.property_rate_limits.get(&property.to_string()) {
-                    // Only decrement if we're still within the same window and count is greater than 0
-                    if current_time < entry.window_start + window_duration
-                        && entry.request_count > 0
-                    {
-                        entry.request_count -= 1;
-                        self.property_rate_limits
-                            .insert(property.to_string(), entry);
-                    }
+            if let Some(mut entry) = self.property_rate_limits.get(&property.to_string()) {
+                // Only decrement if we're still within the same window and count is greater than 0
+                if current_time < entry.window_start + window_duration && entry.request_count > 0 {
+                    entry.request_count -= 1;
+                    self.property_rate_limits
+                        .insert(property.to_string(), entry);
                 }
             }
         }

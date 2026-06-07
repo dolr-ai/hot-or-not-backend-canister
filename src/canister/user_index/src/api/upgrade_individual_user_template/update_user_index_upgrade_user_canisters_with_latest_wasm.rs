@@ -1,11 +1,11 @@
 use std::time::SystemTime;
 
 use candid::Principal;
-use ic_cdk::{api::management_canister::main::CanisterSettings, call};
+use ic_cdk::call;
 
 use shared_utils::{
     canister_specific::{
-        individual_user_template::{self, types::arg::IndividualUserTemplateInitArgs},
+        individual_user_template::types::arg::IndividualUserTemplateInitArgs,
         user_index::types::UpgradeStatus,
     },
     common::{
@@ -148,7 +148,7 @@ async fn send_upgrade_report_to_platform_orchestrator(subnet_upgrade_status: Upg
         })
         .expect("Platform Orchestrator Canister Id to be Present");
 
-    call::<_, (Result<(), String>,)>(
+    let _ = call::<_, (Result<(), String>,)>(
         platform_orchestrator_canister_id,
         "report_subnet_upgrade_status",
         (subnet_upgrade_status,),

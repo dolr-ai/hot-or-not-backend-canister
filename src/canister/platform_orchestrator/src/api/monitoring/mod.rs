@@ -1,8 +1,4 @@
-use std::borrow::Cow;
-
-use candid::{candid_method, types::principal, CandidType};
 use ic_cdk::api;
-use serde::Deserialize;
 use shared_utils::common::{
     types::http::{HeaderField, HttpRequest, HttpResponse},
     utils::{get_heap_memory_size, get_stable_memory_size},
