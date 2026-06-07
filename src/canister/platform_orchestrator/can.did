@@ -5,11 +5,6 @@ type ControlledCanisterDetails = record {
   cycle_balance : nat;
   reserved_cycles : nat;
 };
-type DecommissionStatus = record {
-  failed_canisters : vec record { principal; text };
-  completed_count : nat64;
-  canisters_remaining : vec principal;
-};
 type HttpRequest = record {
   url : text;
   method : text;
@@ -21,16 +16,13 @@ type HttpResponse = record {
   headers : vec record { text; text };
   status_code : nat16;
 };
-type Result = variant { Ok : text; Err : text };
-type Result_1 = variant { Ok; Err : text };
+type Result = variant { Ok; Err : text };
+type Result_1 = variant { Ok : text; Err : text };
 type Result_2 = variant { Ok : ControlledCanisterDetails; Err : text };
 service : () -> {
-  decommission_all_controlled_canisters : (vec principal, opt blob) -> (Result);
-  decommission_individual_canister : (principal, opt blob) -> (Result_1);
-  deposit_cycles_to_canister : (principal, nat) -> (Result);
+  add_our_identity_as_controller : (principal) -> (Result);
+  deposit_cycles_to_canister : (principal, nat) -> (Result_1);
   get_controllers_and_cycle_balance : (principal) -> (Result_2);
-  get_decommission_status : () -> (DecommissionStatus) query;
   get_version : () -> (text) query;
   http_request : (HttpRequest) -> (HttpResponse) query;
-  install_individual_user_wasm : (principal, blob) -> (Result_1);
 }

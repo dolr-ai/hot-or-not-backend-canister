@@ -4,6 +4,25 @@
 /// we can call install_code(Upgrade) on the IC management canister — no
 /// quill, no neuron voting, no waiting.
 ///
+/// NOTE (post-PO-cleanup): The platform_orchestrator was intentionally reduced
+/// to a minimal surface for cycle harvesting. The old PO methods `upload_wasms`,
+/// `upgrade_canisters_in_network`, and the wasm storage/provisioning logic were
+/// removed. Calls to `po.upload_wasms(...)` (as seen in the old `scripts/deploy-local.sh`
+/// and in the raw `.update` sites below) now produce:
+///   "Canister has no update method 'upload_wasms'".
+///
+/// Current local PO validation and setup is done via the cargo test
+/// `setup_local_po_and_validate_harvest_methods` (see local_po_setup.rs).
+/// For direct PO upgrades on a controller identity: use
+///   `dfx canister install platform_orchestrator --mode=upgrade --network ic`
+/// (the actions_identity.pem principal must be a controller of the PO).
+///
+/// The code below is retained for reference / future adaptation of fleet-wide
+/// upgrade flows (user_index / individual templates are now driven from other
+/// entry points after the PO simplification). It will fail against current PO
+/// until the upload/upgrade paths are reimplemented outside PO or the tests
+/// are updated to the post-cleanup architecture.
+///
 /// Run with:
 ///   cargo test -p task_runner -- --ignored upgrade_po_directly --nocapture
 ///   cargo test -p task_runner -- --ignored upgrade_po_and_ui_directly --nocapture

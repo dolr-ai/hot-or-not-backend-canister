@@ -15,9 +15,23 @@
 ///
 /// Resumable: re-running skips already-harvested canisters (cycle_harvested table).
 ///
-/// Run with:
+/// Local setup (required before running harvest tests against a *local* replica):
+///   cargo test -p task_runner -- --ignored setup_local_po_and_validate_harvest_methods --nocapture
+/// This starts a clean dfx replica, deploys the *current* platform_orchestrator (post-cleanup),
+/// creates a controllable test target, adds the necessary controllers, and verifies that
+/// the PO exposes `add_our_identity_as_controller`, `get_controllers_and_cycle_balance`,
+/// `get_version`, etc. (i.e. no "Canister has no update method" errors).
+///
+/// The old `scripts/deploy-local.sh` (and raw calls to `upload_wasms` inside it) are
+/// obsolete after the PO was stripped to the harvest surface; they will hit exactly the
+/// error: "Canister has no update method 'upload_wasms'".
+///
+/// Run harvest tests with:
 ///   cargo test -p task_runner -- --ignored harvest_single_canister --nocapture
 ///   cargo test -p task_runner -- --ignored harvest_cycles_batch --nocapture
+///
+/// For harvest_single_canister you can also force an exact ID via env var (see
+/// the function for the exact command).
 use anyhow::{Context, Result};
 use candid::{Encode, Principal};
 
@@ -332,6 +346,10 @@ enum CanisterRunningStatus {
 
 /// Harvest cycles from a single canister (first pending one).
 /// Useful for validating the flow before running batches.
+///
+/// To target a *specific* canister ID (instead of the next one from the DB query):
+///   HARVEST_CANISTER_ID=z7bpd-waaaa-aaaag-acogq-cai \
+///     cargo test -p task_runner -- --ignored harvest_single_canister --nocapture
 #[tokio::test]
 #[ignore = "harvests cycles on mainnet — run explicitly"]
 async fn harvest_single_canister() -> Result<()> {
@@ -340,14 +358,20 @@ async fn harvest_single_canister() -> Result<()> {
     let db_path = root.join(DB_PATH);
 
     let pool = open_pool(db_path.to_str().unwrap()).await?;
-    let pending = pending_harvests(&pool, 1).await?;
 
-    if pending.is_empty() {
-        println!("No pending canisters to harvest.");
-        return Ok(());
-    }
-
-    let canister_id = &pending[0];
+    // Allow forcing an exact canister (e.g. the one from a previous partial run)
+    // instead of letting pending_harvests pick the "next" from the DB.
+    let canister_id: Principal = if let Ok(id_str) = std::env::var("HARVEST_CANISTER_ID") {
+        Principal::from_text(&id_str)
+            .with_context(|| format!("invalid HARVEST_CANISTER_ID: {}", id_str))?
+    } else {
+        let pending = pending_harvests(&pool, 1).await?;
+        if pending.is_empty() {
+            println!("No pending canisters to harvest.");
+            return Ok(());
+        }
+        pending[0]
+    };
     println!("Harvesting: {}", canister_id);
 
     // Build individual_user_template wasm.
@@ -368,12 +392,12 @@ async fn harvest_single_canister() -> Result<()> {
     let po = Principal::from_text(PLATFORM_ORCHESTRATOR_ID)?;
 
     let (pre_balance, pre_reserved, post_uninstall, transferred, topped_up) =
-        harvest_canister(&agent, po, *canister_id, &wasm_blob).await?;
+        harvest_canister(&agent, po, canister_id, &wasm_blob).await?;
 
     // Mark as harvested in DB — only after all steps succeed and validations pass.
     mark_harvested(
         &pool,
-        canister_id,
+        &canister_id,
         pre_balance,
         pre_reserved,
         post_uninstall,
