@@ -3,7 +3,10 @@
 ///
 /// Flow per canister:
 ///   1. Get pre-state (balance, reserved, status, has_wasm)
-///   2. Add actions_identity as controller via PO endpoint
+///   2. Add actions_identity as controller via PO endpoint; *immediately* re-query the
+///      management canister directly (canister_status) using the actions-signed agent
+///      and assert the actions principal is now in the returned controllers list
+///      (explicit post-Ok check, no polling loop).
 ///   3. Uninstall wasm (if installed) → releases reserved cycles to main balance
 ///   4. Check post-uninstall balance; top up with 0.5T if < 500M
 ///   5. Install individual_user_template wasm
@@ -100,6 +103,7 @@ struct CanisterSettings {
 /// Harvest cycles from a single canister. Returns (pre_balance, pre_reserved, post_uninstall, cycles_transferred, topped_up).
 async fn harvest_canister(
     agent: &ic_agent::Agent,
+    actions_principal: Principal,
     po: Principal,
     canister_id: Principal,
     wasm_blob: &[u8],
@@ -140,7 +144,57 @@ async fn harvest_canister(
         .await
         .map_err(|e| anyhow::anyhow!("add_our_identity_as_controller failed: {}", e))?;
     println!("  ✓ actions_identity added as controller");
+    // Immediately after the add_our update call returns Ok, re-query the management
+    // canister directly using the actions-signed agent and assert that the actions
+    // principal is present in the controllers list.
+    //
+    // This is the explicit "wait for the update call to finish and after receiving the
+    // Ok response, assert" check (no polling loop, per the request). We now call the
+    // management canister's `canister_status` directly because:
+    //   - `dfx canister status` and `dfx canister info` (just executed) confirmed the
+    //     actions identity (zg7n3...) is a live controller and can query successfully
+    //   - A direct call mirrors the dfx path and exercises the identity's authorization
+    //     for management queries on the target
+    //   - The PO-mediated path was used before we had this confirmation; now it's
+    //     unnecessary indirection
+    let verify_arg = Encode!(&CanisterIdRecord { canister_id })?;
+    let verify_response = agent
+        .query(
+            &Principal::from_text(MANAGEMENT_CANISTER).unwrap(),
+            "canister_status",
+        )
+        .with_arg(verify_arg)
+        .call()
+        .await
+        .map_err(|e| anyhow::anyhow!("post-add verify canister_status failed: {}", e))?;
 
+    #[derive(candid::CandidType, candid::Deserialize)]
+    struct CanisterStatusResult {
+        status: CanisterRunningStatus,
+        settings: CanisterSettings,
+        module_hash: Option<Vec<u8>>,
+        memory_size: candid::Nat,
+        cycles: candid::Nat,
+        idle_cycles_burned_per_day: candid::Nat,
+    }
+
+    let verify_status: CanisterStatusResult =
+        candid::decode_one(&verify_response)
+            .map_err(|e| anyhow::anyhow!("failed to decode post-add verify canister_status: {}", e))?;
+
+    if !verify_status.settings.controllers.as_ref().map(|c| c.contains(&actions_principal)).unwrap_or(false) {
+        anyhow::bail!(
+            "add_our_identity_as_controller returned Ok but actions principal {} is NOT in the controllers list from management canister (got {:?}). \
+             dfx canister status/info for {} should be inspected. The controller mutation did not take effect.",
+            actions_principal,
+            verify_status.settings.controllers,
+            canister_id
+        );
+    }
+    println!(
+        "  \u2713 post-add assertion passed: actions principal {} is present in management canister-reported controllers for {}",
+        actions_principal, canister_id
+    );
     // Step 3: Uninstall wasm (if installed).
     if has_wasm {
         let uninstall_arg = Encode!(&CanisterIdRecord { canister_id })?;
@@ -392,8 +446,18 @@ async fn harvest_single_canister() -> Result<()> {
     let agent = agent_from_pem(&pem_path).await?;
     let po = Principal::from_text(PLATFORM_ORCHESTRATOR_ID)?;
 
+    // Derive the actions principal from the same PEM used for the agent.
+    // Passed into harvest_canister so we can assert (right after add_our returns Ok)
+    // that the PO now reports this principal in the target's controllers list.
+    // This is the explicit "wait for update to finish then assert" check (no polling).
+    let actions_identity = ic_agent::identity::Secp256k1Identity::from_pem_file(&pem_path)
+        .with_context(|| format!("failed to load Secp256k1Identity from {}", pem_path.display()))?;
+    let actions_principal = actions_identity
+        .sender()
+        .context("could not derive sender principal from actions_identity.pem")?;
+
     let (pre_balance, pre_reserved, post_uninstall, transferred, topped_up) =
-        harvest_canister(&agent, po, canister_id, &wasm_blob).await?;
+        harvest_canister(&agent, actions_principal, po, canister_id, &wasm_blob).await?;
 
     // Mark as harvested in DB — only after all steps succeed and validations pass.
     mark_harvested(
@@ -457,6 +521,15 @@ async fn harvest_cycles_batch() -> Result<()> {
     let agent = agent_from_pem(&pem_path).await?;
     let po = Principal::from_text(PLATFORM_ORCHESTRATOR_ID)?;
 
+    // Derive the actions principal once for the batch (same identity for all canisters).
+    // Passed into harvest_canister so the post-add_our Ok assertion can verify the
+    // PO reports the principal in the controllers list before direct mgmt calls.
+    let actions_identity = ic_agent::identity::Secp256k1Identity::from_pem_file(&pem_path)
+        .with_context(|| format!("failed to load Secp256k1Identity from {}", pem_path.display()))?;
+    let actions_principal = actions_identity
+        .sender()
+        .context("could not derive sender principal from actions_identity.pem")?;
+
     // Process each canister sequentially.
     let mut total_transferred: u128 = 0;
     let mut batch_success = 0;
@@ -470,7 +543,7 @@ async fn harvest_cycles_batch() -> Result<()> {
             canister_id
         );
 
-        match harvest_canister(&agent, po, *canister_id, &wasm_blob).await {
+        match harvest_canister(&agent, actions_principal, po, *canister_id, &wasm_blob).await {
             Ok((pre_balance, pre_reserved, post_uninstall, transferred, topped_up)) => {
                 total_transferred += transferred;
 

@@ -2,20 +2,13 @@ use std::collections::HashSet;
 
 use crate::{
     util::canister_management::{
-        check_and_request_cycles_from_platform_orchestrator, create_empty_user_canister,
-        install_canister_wasm, provision_number_of_empty_canisters, recharge_canister,
-        recharge_canister_for_installing_wasm,
+        check_and_request_cycles_from_platform_orchestrator, install_canister_wasm,
+        provision_number_of_empty_canisters, recharge_canister_for_installing_wasm,
     },
     CANISTER_DATA,
 };
 use candid::Principal;
-use futures::{future::BoxFuture, FutureExt};
-use ic_cdk::api::{
-    call,
-    management_canister::main::{
-        canister_info, canister_status, deposit_cycles, CanisterIdRecord, CanisterInfoRequest,
-    },
-};
+use ic_cdk::api::call;
 use ic_cdk_macros::update;
 use shared_utils::{
     canister_specific::individual_user_template::types::session::SessionType,
@@ -59,39 +52,6 @@ async fn get_requester_principals_canister_id_create_if_not_exists() -> Result<P
             call::notify(created_canister_id, "get_rewarded_for_signing_up", ()).ok();
 
             Ok(created_canister_id)
-        }
-    }
-}
-
-#[deprecated(note = "use get_requester_principals_canister_id_create_if_not_exists instead")]
-#[update]
-async fn get_requester_principals_canister_id_create_if_not_exists_and_optionally_allow_referrer(
-) -> Principal {
-    let api_caller = ic_cdk::caller();
-
-    if api_caller == Principal::anonymous() {
-        panic!("Anonymous principal is not allowed to call this method");
-    }
-
-    let canister_id_for_this_caller = CANISTER_DATA.with(|canister_data_ref_cell| {
-        canister_data_ref_cell
-            .borrow()
-            .user_principal_id_to_canister_id_map
-            .get(&api_caller)
-            .cloned()
-    });
-
-    match canister_id_for_this_caller {
-        // * canister already exists
-        Some(canister_id) => canister_id,
-        None => {
-            // * create new canister
-            let created_canister_id = new_user_signup(api_caller).await.unwrap();
-
-            // * reward user for signing up
-            call::notify(created_canister_id, "get_rewarded_for_signing_up", ()).ok();
-
-            created_canister_id
         }
     }
 }
@@ -267,16 +227,6 @@ async fn provision_new_available_canisters(individual_user_template_canister_was
         breaking_condition,
     )
     .await;
-}
-
-async fn provision_new_backup_canisters(canister_count: u64) {
-    let breaking_condition = || {
-        CANISTER_DATA.with_borrow(|canister_data| {
-            canister_data.backup_canister_pool.len() as u64
-                > get_backup_individual_user_canister_batch_size()
-        })
-    };
-    provision_number_of_empty_canisters(canister_count, breaking_condition).await;
 }
 
 #[cfg(test)]
