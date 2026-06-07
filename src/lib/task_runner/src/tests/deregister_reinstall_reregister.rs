@@ -114,6 +114,7 @@ async fn reinstall_po_directly() {
 
     println!("Building platform_orchestrator for mainnet...");
     let status = std::process::Command::new("dfx")
+        .env("DFX_WARNING", "-mainnet_plaintext_identity")
         .args(["build", "platform_orchestrator", "--network=ic"])
         .current_dir(&root)
         .status()

@@ -1,12 +1,8 @@
 use candid::Principal;
-use ic_cdk::api::management_canister::main::CanisterInstallMode;
 use ic_cdk_macros::update;
 use shared_utils::{
     canister_specific::individual_user_template::types::arg::IndividualUserTemplateInitArgs,
-    common::{
-        types::{known_principal, wasm},
-        utils::permissions::is_caller_controller,
-    },
+    common::utils::permissions::is_caller_controller,
 };
 
 use crate::{util::canister_management::recharge_and_upgrade, CANISTER_DATA};

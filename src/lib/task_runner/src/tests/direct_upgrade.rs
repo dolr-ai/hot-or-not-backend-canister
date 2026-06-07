@@ -72,6 +72,7 @@ fn build_canister(name: &str) -> Result<std::path::PathBuf> {
     let root = workspace_root();
     println!("Building {name} for mainnet...");
     let status = Command::new("dfx")
+        .env("DFX_WARNING", "-mainnet_plaintext_identity")
         .args(["build", name, "--network=ic"])
         .current_dir(&root)
         .status()
@@ -109,6 +110,7 @@ fn regenerate_candid(canisters: &[&str]) -> Result<()> {
     let mut args = vec!["scripts/generate-candid.sh"];
     args.extend(canisters.iter().map(|s| *s));
     let status = Command::new("bash")
+        .env("DFX_WARNING", "-mainnet_plaintext_identity")
         .args(&args)
         .current_dir(&root)
         .status()
@@ -121,6 +123,7 @@ fn regenerate_candid(canisters: &[&str]) -> Result<()> {
 fn get_canister_id(name: &str) -> Result<Principal> {
     let root = workspace_root();
     let output = Command::new("dfx")
+        .env("DFX_WARNING", "-mainnet_plaintext_identity")
         .args(["canister", "id", name, "--network=ic"])
         .current_dir(&root)
         .output()
@@ -135,6 +138,7 @@ fn upgrade_canister_via_dfx(canister_name: &str, _wasm_path: &std::path::Path, v
     println!("  Running dfx canister install --mode=upgrade {canister_name}...");
 
     let output = Command::new("dfx")
+        .env("DFX_WARNING", "-mainnet_plaintext_identity")
         .args([
             "canister", "install", "--mode=upgrade", canister_name,
             "--network=ic",

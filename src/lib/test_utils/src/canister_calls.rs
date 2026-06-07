@@ -1,9 +1,6 @@
 use std::error::Error;
 
-use candid::{
-    utils::{ArgumentDecoder, ArgumentEncoder},
-    CandidType, Deserialize, Principal,
-};
+use candid::{utils::ArgumentEncoder, CandidType, Deserialize, Principal};
 use pocket_ic::{PocketIc, WasmResult};
 
 pub fn query<A, T>(

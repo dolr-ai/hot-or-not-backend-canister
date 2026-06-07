@@ -1,7 +1,5 @@
 use candid::Principal;
-use ic_cdk::api::management_canister::main::{
-    deposit_cycles, CanisterIdRecord, CanisterInstallMode,
-};
+use ic_cdk::api::management_canister::main::CanisterInstallMode;
 use ic_cdk_macros::update;
 use shared_utils::{
     canister_specific::individual_user_template::types::arg::IndividualUserTemplateInitArgs,

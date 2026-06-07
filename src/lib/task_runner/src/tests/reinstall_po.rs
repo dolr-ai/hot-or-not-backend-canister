@@ -25,6 +25,7 @@ async fn reinstall_po() {
     // Always build the latest wasm before submitting.
     println!("Building platform_orchestrator for mainnet...");
     let build_status = std::process::Command::new("dfx")
+        .env("DFX_WARNING", "-mainnet_plaintext_identity")
         .args(["build", "platform_orchestrator", "--network=ic"])
         .current_dir(&root)
         .status()

@@ -377,6 +377,7 @@ async fn harvest_single_canister() -> Result<()> {
     // Build individual_user_template wasm.
     println!("Building individual_user_template for mainnet...");
     let status = std::process::Command::new("dfx")
+        .env("DFX_WARNING", "-mainnet_plaintext_identity")
         .args(["build", "individual_user_template", "--network=ic"])
         .current_dir(&root)
         .status()
@@ -441,6 +442,7 @@ async fn harvest_cycles_batch() -> Result<()> {
     // Build individual_user_template wasm once.
     println!("\nBuilding individual_user_template for mainnet...");
     let status = std::process::Command::new("dfx")
+        .env("DFX_WARNING", "-mainnet_plaintext_identity")
         .args(["build", "individual_user_template", "--network=ic"])
         .current_dir(&root)
         .status()
