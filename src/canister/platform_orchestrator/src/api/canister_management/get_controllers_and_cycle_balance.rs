@@ -1,8 +1,5 @@
-use candid::{CandidType, Deserialize, Principal};
-use ic_cdk::api::management_canister::{
-    main::{canister_status, CanisterStatusType},
-    provisional::CanisterIdRecord,
-};
+use candid::{CandidType, Deserialize, Nat, Principal};
+use ic_cdk::api::management_canister::provisional::CanisterIdRecord;
 use ic_cdk_macros::update;
 use serde::Serialize;
 

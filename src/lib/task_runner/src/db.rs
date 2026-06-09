@@ -301,7 +301,7 @@ pub async fn mark_harvest_failed(
 ) -> Result<()> {
     let text = principal.to_text();
     sqlx::query!(
-        "INSERT INTO cycle_harvest_failures (principal, reason) VALUES (?, ?)",
+        "INSERT INTO cycle_harvest_failures (principal, reason, failed_at) VALUES (?, ?, datetime('now'))",
         text,
         reason
     )

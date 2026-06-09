@@ -38,6 +38,9 @@
 use anyhow::{Context, Result};
 use candid::{encode_args, Encode, Principal};
 use ic_agent::Identity;
+use std::sync::Arc;
+use tokio::sync::Semaphore;
+use tokio::task::JoinSet;
 
 use crate::{
     agent::{agent_from_pem, workspace_root},
@@ -62,9 +65,6 @@ const TOP_UP_AMOUNT: u128 = 500_000_000_000; // 0.5T
 /// Path to the individual_user_template wasm (built for mainnet).
 const INDIVIDUAL_USER_WASM_PATH: &str =
     ".dfx/ic/canisters/individual_user_template/individual_user_template.wasm.gz";
-
-/// Batch size for harvest_cycles_batch test.
-const BATCH_SIZE: i64 = 4;
 
 // ── Helper types for management canister calls ────────────────────────────────
 
@@ -499,7 +499,7 @@ async fn harvest_canister(
     let mut topped_up: u128 = 0;
     if post_uninstall_balance < MIN_REINSTALL_BALANCE {
         println!(
-            "  ⚠ balance too low ({} TC < {} TC), topping up with 0.5T...",
+            "  \u{26A0} balance too low ({} TC < {} TC), topping up with 0.5T...",
             format_cycles(post_uninstall_balance),
             format_cycles(MIN_REINSTALL_BALANCE)
         );
@@ -514,14 +514,31 @@ async fn harvest_canister(
             .map_err(|e| anyhow::anyhow!("deposit_cycles_to_canister failed: {}", e))?;
 
         topped_up = TOP_UP_AMOUNT;
-        println!("  ✓ topped up with 0.5T");
+        println!("  \u{2713} topped up with 0.5T");
     }
 
+    // Unconditionally ensure the canister is empty right before we install the template.
+    // This is the robust fix for IC0514 "canister not empty" (the early has_wasm
+    // decision or a prior partial run can leave code on the canister). We ignore any
+    // error because "no module" (already empty) is the happy case. Reinstall would
+    // also work for non-empty canisters, but an explicit uninstall + Install is
+    // simple, matches dfx force-restore patterns, and guarantees a clean stable memory.
+    let _ = agent
+        .update(
+            &Principal::from_text(MANAGEMENT_CANISTER).unwrap(),
+            "uninstall_code",
+        )
+        .with_arg(encode_args((CanisterIdRecord { canister_id },))?)
+        .with_effective_canister_id(canister_id)
+        .call_and_wait()
+        .await;
+
     // Step 5: Install individual_user_template wasm.
-    // Use the proper variant-based mode to match the current management canister interface
-    // (the replica rejected the old i32-based InstallCodeArgument with subtyping error).
+    // Always use Reinstall mode + unconditional pre-uninstall (see above) so this is
+    // robust against IC0514 "canister not empty" and partial prior runs.
+    // This matches the behavior dfx uses for force-restore/install scenarios.
     let install_arg = encode_args((InstallCodeArgs {
-        mode: CanisterInstallMode::Install,
+        mode: CanisterInstallMode::Reinstall,
         canister_id,
         wasm_module: wasm_blob.to_vec(),
         arg: vec![],
@@ -588,11 +605,12 @@ async fn harvest_canister(
     	    );
 
     // Step 6: Transfer cycles to PO, passing an explicit reserve (cycles to leave behind).
-    // Strategy borrowed from dfx delete.rs: start at 30B (WITHDRAWAL_COST), on out-of-cycles
-    // during the deposit_cycles inside the template, retry with +10B steps up to 100B.
-    // If even 100B reserve fails, accept 0 transferred and continue to final uninstall + lockdown.
+    // Start at 50B (batch runs showed 30B consistently insufficient after a fresh
+    // individual_user_template install). Step +10B on "Couldn't send message" / out-of-cycles
+    // up to 100B max. If it still fails at 100B, accept 0 transferred and proceed to
+    // final uninstall + PO-only lockdown (the transfer is best-effort).
     let mut cycles_transferred: u128 = 0;
-    let mut reserve = 30_000_000_000u128; // 30B like dfx
+    let mut reserve = 50_000_000_000u128; // bumped from 30B after fleet batch observed consistent failures
     let max_reserve: u128 = 100_000_000_000; // 100B
 
     while reserve <= max_reserve {
@@ -612,7 +630,7 @@ async fn harvest_canister(
 
         let (succeeded, transferred, should_retry_higher) = match transfer_result {
             Ok(response) => {
-                let (result,): (Result<u128, String>,) = candid::decode_one(&response)
+                let result: Result<u128, String> = candid::decode_one(&response)
                     .map_err(|e| anyhow::anyhow!("failed to decode transfer result: {}", e))?;
                 match result {
                     Ok(amount) => (true, amount, false),
@@ -762,6 +780,41 @@ fn is_out_of_cycles_error(s: &str) -> bool {
         || s.contains("couldn't send message")
 }
 
+/// Prints a `dfx canister status` for the Platform Orchestrator so we can
+/// observe whether its cycle balance is increasing as a result of harvest
+/// transfers (the `return_cycle_balance_to_platform_orchestrator` calls deposit
+/// cycles into the PO).
+fn print_po_cycle_balance(label: &str, root: &std::path::Path) {
+    println!(
+        "
+=== Platform Orchestrator cycle balance ({}) ===",
+        label
+    );
+    let _ = std::process::Command::new("dfx")
+        .env("DFX_WARNING", "-mainnet_plaintext_identity")
+        .args([
+            "canister",
+            "status",
+            PLATFORM_ORCHESTRATOR_ID,
+            "--network=ic",
+        ])
+        .current_dir(root)
+        .status();
+    println!("=== end PO status ({}) ===\n", label);
+}
+
+#[derive(Default)]
+struct BatchStats {
+    success: usize,
+    failed: usize,
+    transferred: u128,
+}
+
+struct HarvestOutcome {
+    succeeded: bool,
+    transferred: u128,
+}
+
 // ── Helper types for PO API responses ─────────────────────────────────────────
 
 #[derive(candid::CandidType, candid::Deserialize, Debug)]
@@ -811,17 +864,20 @@ async fn harvest_single_canister() -> Result<()> {
     };
     println!("Harvesting: {}", canister_id);
 
-    // Build individual_user_template wasm.
-    println!("Building individual_user_template for mainnet...");
-    let status = std::process::Command::new("dfx")
+    // Build individual_user_template wasm and auto-regenerate its Candid interface
+    // (so the .did is always produced from the exact compiled export_candid!() in this build).
+    // We invoke the project's generate-candid.sh instead of raw `dfx build` so the
+    // checked-in can.did for individual_user_template stays in sync automatically.
+    println!("Building individual_user_template + regenerating Candid via generate-candid.sh...");
+    let status = std::process::Command::new("bash")
         .env("DFX_WARNING", "-mainnet_plaintext_identity")
-        .args(["build", "individual_user_template", "--network=ic"])
+        .args(["scripts/generate-candid.sh", "individual_user_template"])
         .current_dir(&root)
         .status()
-        .context("dfx not found")?;
+        .context("bash or scripts/generate-candid.sh not found")?;
     anyhow::ensure!(
         status.success(),
-        "dfx build individual_user_template failed"
+        "scripts/generate-candid.sh individual_user_template failed"
     );
 
     let wasm_path = root.join(INDIVIDUAL_USER_WASM_PATH);
@@ -884,30 +940,29 @@ async fn harvest_cycles_batch() -> Result<()> {
     let (done, failed) = harvest_counts(&pool).await?;
     println!("Current progress: {} harvested, {} failures", done, failed);
 
-    let pending = pending_harvests(&pool, BATCH_SIZE).await?;
-
-    if pending.is_empty() {
+    let initial_pending = pending_harvests(&pool, 1).await?;
+    if initial_pending.is_empty() {
         println!("No pending canisters to harvest.");
         return Ok(());
     }
 
     println!(
-        "Processing batch of {} canisters ({} already done)...",
-        pending.len(),
+        "Processing all pending canisters ({} already done) with up to 4 in flight...",
         done
     );
 
-    // Build individual_user_template wasm once.
-    println!("\nBuilding individual_user_template for mainnet...");
-    let status = std::process::Command::new("dfx")
+    // Build individual_user_template wasm once + auto-regenerate its Candid interface
+    // via the project's generate-candid.sh (ensures .did is produced from this exact build's export_candid!()).
+    println!("\nBuilding individual_user_template + regenerating Candid via generate-candid.sh...");
+    let status = std::process::Command::new("bash")
         .env("DFX_WARNING", "-mainnet_plaintext_identity")
-        .args(["build", "individual_user_template", "--network=ic"])
+        .args(["scripts/generate-candid.sh", "individual_user_template"])
         .current_dir(&root)
         .status()
-        .context("dfx not found")?;
+        .context("bash or scripts/generate-candid.sh not found")?;
     anyhow::ensure!(
         status.success(),
-        "dfx build individual_user_template failed"
+        "scripts/generate-candid.sh individual_user_template failed"
     );
 
     let wasm_path = root.join(INDIVIDUAL_USER_WASM_PATH);
@@ -915,7 +970,7 @@ async fn harvest_cycles_batch() -> Result<()> {
         .with_context(|| format!("wasm not found at {}", wasm_path.display()))?;
     println!("  wasm size: {} bytes", wasm_blob.len());
 
-    let agent = agent_from_pem(&pem_path).await?;
+    let agent = Arc::new(agent_from_pem(&pem_path).await?);
     let po = Principal::from_text(PLATFORM_ORCHESTRATOR_ID)?;
 
     // Derive the actions principal once for the batch (same identity for all canisters).
@@ -935,65 +990,137 @@ async fn harvest_cycles_batch() -> Result<()> {
         )
     })?;
 
-    // Process each canister sequentially.
-    let mut total_transferred: u128 = 0;
-    let mut batch_success = 0;
-    let mut batch_failed = 0;
+    // Wrap for sharing across concurrent tasks.
+    let wasm_blob = Arc::new(wasm_blob);
+    let pool = Arc::new(pool);
 
-    for (i, canister_id) in pending.iter().enumerate() {
-        println!(
-            "\n========== [{}/{}] Harvesting {} ==========",
-            i + 1,
-            pending.len(),
-            canister_id
-        );
+    // Snapshot PO balance before any harvest transfers this batch.
+    print_po_cycle_balance("before batch harvest", &root);
 
-        match harvest_canister(&agent, actions_principal, po, *canister_id, &wasm_blob).await {
-            Ok((pre_balance, pre_reserved, post_uninstall, transferred, topped_up)) => {
-                total_transferred += transferred;
+    let semaphore = Arc::new(Semaphore::new(4));
+    let stats = Arc::new(tokio::sync::Mutex::new(BatchStats::default()));
+    let mut join_set: JoinSet<HarvestOutcome> = JoinSet::new();
 
-                // Mark as harvested in DB — only after all steps succeed.
-                mark_harvested(
-                    &pool,
-                    canister_id,
-                    pre_balance,
-                    pre_reserved,
-                    post_uninstall,
-                    transferred,
-                    topped_up,
-                )
-                .await?;
+    loop {
+        // Try to spawn as many new tasks as there are available semaphore permits.
+        let available = semaphore.available_permits();
+        if available > 0 {
+            let fetch_n = available as i64;
+            let pending = pending_harvests(pool.as_ref(), fetch_n).await?;
+            if !pending.is_empty() {
+                for canister_id in pending {
+                    let sem = semaphore.clone();
+                    let ag = agent.clone();
+                    let wsm = wasm_blob.clone();
+                    let pl = pool.clone();
+                    let act = actions_principal.clone();
+                    let p = po.clone();
+                    let st = stats.clone();
 
-                batch_success += 1;
-                println!(
-                    "  ✓ [{}] harvested, transferred {} TC{}",
-                    i + 1,
-                    format_cycles(transferred),
-                    if topped_up > 0 { " (topped up)" } else { "" }
-                );
+                    join_set.spawn(async move {
+                        let _permit = sem.acquire().await.expect("semaphore permit");
+
+                        match harvest_canister(&ag, act, p, canister_id, &wsm).await {
+                            Ok((
+                                pre_balance,
+                                pre_reserved,
+                                post_uninstall,
+                                transferred,
+                                topped_up,
+                            )) => {
+                                if let Err(e) = mark_harvested(
+                                    pl.as_ref(),
+                                    &canister_id,
+                                    pre_balance,
+                                    pre_reserved,
+                                    post_uninstall,
+                                    transferred,
+                                    topped_up,
+                                )
+                                .await
+                                {
+                                    println!(
+                                        "  warning: mark_harvested failed for {}: {}",
+                                        canister_id, e
+                                    );
+                                }
+
+                                {
+                                    let mut g = st.lock().await;
+                                    g.success += 1;
+                                    g.transferred += transferred;
+                                }
+
+                                println!(
+                                    "  \u{2713} [{}] harvested, transferred {} TC{}",
+                                    canister_id,
+                                    format_cycles(transferred),
+                                    if topped_up > 0 { " (topped up)" } else { "" }
+                                );
+
+                                HarvestOutcome {
+                                    succeeded: true,
+                                    transferred,
+                                }
+                            }
+                            Err(e) => {
+                                let reason = e.to_string();
+                                let _ =
+                                    mark_harvest_failed(pl.as_ref(), &canister_id, &reason).await;
+
+                                {
+                                    let mut g = st.lock().await;
+                                    g.failed += 1;
+                                }
+
+                                println!("  \u{2717} [{}] failed: {}", canister_id, reason);
+
+                                HarvestOutcome {
+                                    succeeded: false,
+                                    transferred: 0,
+                                }
+                            }
+                        }
+                    });
+                }
             }
-            Err(e) => {
-                batch_failed += 1;
-                let reason = e.to_string();
-                println!("  ✗ [{}] failed: {}", i + 1, reason);
+        }
 
-                // Mark as failed in DB.
-                mark_harvest_failed(&pool, canister_id, &reason).await.ok();
+        // If no tasks are running and there are no pending canisters, we are done.
+        let pending_check = pending_harvests(pool.as_ref(), 1).await?;
+        if join_set.is_empty() && pending_check.is_empty() {
+            break;
+        }
+
+        // Wait for at least one task to complete (this keeps the concurrency going).
+        // When one finishes, the loop will fetch/spawn new ones on next iteration.
+        if let Some(result) = join_set.join_next().await {
+            match result {
+                Ok(_outcome) => { /* stats and marking already updated inside the spawned task */ }
+                Err(e) => {
+                    println!("  \u{2717} harvest task panicked: {}", e);
+                }
             }
         }
     }
 
+    let final_stats = stats.lock().await;
+
     // Summary.
     let (final_done, final_failed) = harvest_counts(&pool).await?;
     println!("\n========== Batch Summary ==========");
-    println!("  Harvested this batch: {}", batch_success);
-    println!("  Failed this batch: {}", batch_failed);
+    println!("  Harvested this batch: {}", final_stats.success);
+    println!("  Failed this batch: {}", final_stats.failed);
     println!(
-        "  Total transferred this batch: {:?} TC",
-        format_cycles(total_transferred)
+        "  Total transferred this batch: {} TC",
+        format_cycles(final_stats.transferred)
     );
     println!("  Total harvested (all time): {}", final_done);
     println!("  Total failures (all time): {}", final_failed);
+
+    // Snapshot PO balance after the batch to see if the harvest deposits
+    // actually increased its cycle balance.
+    print_po_cycle_balance("after batch harvest", &root);
 
     Ok(())
 }

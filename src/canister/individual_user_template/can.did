@@ -1,2 +1,12 @@
-	type Result = variant { Ok : nat; Err : text };
-service : { return_cycle_balance_to_platform_orchestrator : (nat) -> (Result) }
+type Result = variant { Ok : nat; Err : text };
+service : {
+  // Sends (current_balance - reserve) cycles to the platform_orchestrator via deposit_cycles.
+  // The reserve (passed by the caller) is left behind to cover execution + call overhead.
+  // This matches dfx's approach for canister delete/withdrawal (30B base WITHDRAWAL_COST + retry increases).
+  // 
+  // Must be called before uninstalling this canister's wasm, since deposit_cycles requires
+  // this wasm to be running.
+  // 
+  // Returns the number of cycles transferred (or 0 on early exit).
+  return_cycle_balance_to_platform_orchestrator : (nat) -> (Result);
+}
