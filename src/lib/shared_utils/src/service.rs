@@ -15,7 +15,7 @@ pub trait SetVersion {
 }
 
 pub trait GetVersion {
-    fn get_version(&self) -> Cow<str>;
+    fn get_version(&'_ self) -> Cow<'_, str>;
 }
 
 impl SetVersion for ServiceInitArgs {
@@ -25,7 +25,7 @@ impl SetVersion for ServiceInitArgs {
 }
 
 impl GetVersion for ServiceInitArgs {
-    fn get_version(&self) -> Cow<str> {
+    fn get_version(&'_ self) -> Cow<'_, str> {
         self.version.as_str().into()
     }
 }

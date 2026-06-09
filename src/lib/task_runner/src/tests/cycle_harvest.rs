@@ -259,16 +259,23 @@ async fn harvest_canister(
             .fold(0u128, |acc, d| (acc << 64) | u128::from(d))
     });
 
-    let has_wasm = matches!(
-        status.status,
-        CanisterStatus::Running | CanisterStatus::Stopped
-    );
+    // has_wasm must be based on module_hash (the authoritative field from canister_status),
+    // not merely the high-level status (running/stopped). A canister can report Running
+    // or Stopped while having module_hash = None (no code installed). We uninstall only
+    // when code is present so we can release any reserved cycles tied to the wasm/stable memory.
+    let has_wasm = status.module_hash.is_some();
 
+    let pre_module = if status.module_hash.is_some() {
+        "present"
+    } else {
+        "absent"
+    };
     println!(
-        "  pre_balance: {} TC, pre_reserved: {} TC, status: {:?}",
+        "  pre_balance: {} TC, pre_reserved: {} TC, status: {:?}, module_hash: {}",
         format_cycles(pre_balance),
         format_cycles(pre_reserved),
-        status.status
+        status.status,
+        pre_module
     );
 
     // Step 2: Add actions_identity as controller via PO endpoint.
@@ -428,6 +435,46 @@ async fn harvest_canister(
                 );
             }
         }
+
+        // Immediately re-query management canister_status to *confirm* the uninstall took effect.
+        // The definitive signal is module_hash == None. The high-level "status" (running/stopped)
+        // alone is not reliable for "has code or not".
+        let post_uninst_id = CanisterIdRecord { canister_id };
+        let post_uninst_arg = Encode!(&post_uninst_id)?;
+        let post_uninst_res = agent
+            .update(
+                &Principal::from_text(MANAGEMENT_CANISTER).unwrap(),
+                "canister_status",
+            )
+            .with_arg(post_uninst_arg)
+            .with_effective_canister_id(canister_id)
+            .call_and_wait()
+            .await;
+
+        match post_uninst_res {
+            Ok(resp) => {
+                let s: CanisterStatusResult = candid::decode_one(&resp).map_err(|e| {
+                    anyhow::anyhow!("failed to decode post-uninstall canister_status: {}", e)
+                })?;
+                let module_state = if s.module_hash.is_some() {
+                    "still present"
+                } else {
+                    "absent (confirming uninstall)"
+                };
+                println!(
+                    "  post-uninstall probe: status={:?}, module_hash: {}, cycles now ~{} TC",
+                    s.status,
+                    module_state,
+                    format_cycles(u128::try_from(s.cycles.0.clone()).unwrap_or(0))
+                );
+            }
+            Err(e) => {
+                println!(
+	                    "  \u{26A0} post-uninstall canister_status probe failed (may be ok if canister is being drained): {}",
+	                    e
+	                );
+            }
+        }
     }
 
     // Step 4: Check post-uninstall balance and top up if needed.
@@ -526,47 +573,107 @@ async fn harvest_canister(
             .fold(0u128, |acc, d| (acc << 64) | u128::from(d))
     });
 
+    let post_mod = if post_install_status.module_hash.is_some() {
+        let h = &post_install_status.module_hash.as_ref().unwrap();
+        format!("present ({:x?}...)", &h[..std::cmp::min(4, h.len())])
+    } else {
+        "absent".to_string()
+    };
     println!(
-        "  post_install_balance: {} TC, post_install_reserved: {} TC, status: {:?}",
-        format_cycles(post_install_balance),
-        format_cycles(post_install_reserved),
-        post_install_status.status
-    );
+    	        "  post_install_balance: {} TC, post_install_reserved: {} TC, status: {:?}, module_hash: {}",
+    	        format_cycles(post_install_balance),
+    	        format_cycles(post_install_reserved),
+    	        post_install_status.status,
+    	        post_mod
+    	    );
 
-    // Step 6: Transfer cycles to PO.
-    let transfer_result = agent
-        .update(
-            &canister_id,
-            "return_cycle_balance_to_platform_orchestrator",
-        )
-        .with_arg(encode_args(())?)
-        .call_and_wait()
-        .await;
+    // Step 6: Transfer cycles to PO, passing an explicit reserve (cycles to leave behind).
+    // Strategy borrowed from dfx delete.rs: start at 30B (WITHDRAWAL_COST), on out-of-cycles
+    // during the deposit_cycles inside the template, retry with +10B steps up to 100B.
+    // If even 100B reserve fails, accept 0 transferred and continue to final uninstall + lockdown.
+    let mut cycles_transferred: u128 = 0;
+    let mut reserve = 30_000_000_000u128; // 30B like dfx
+    let max_reserve: u128 = 100_000_000_000; // 100B
 
-    let cycles_transferred = match transfer_result {
-        Ok(response) => {
-            let (result,): (Result<u128, String>,) = candid::decode_one(&response)
-                .map_err(|e| anyhow::anyhow!("failed to decode transfer result: {}", e))?;
-            match result {
-                Ok(amount) => amount,
-                Err(e) => {
-                    println!("  ⚠ return_cycle_balance returned error: {}", e);
-                    0
+    while reserve <= max_reserve {
+        println!(
+            "  attempting return_cycle_balance_to_platform_orchestrator (reserve={}B)...",
+            reserve / 1_000_000_000
+        );
+
+        let transfer_result = agent
+            .update(
+                &canister_id,
+                "return_cycle_balance_to_platform_orchestrator",
+            )
+            .with_arg(encode_args((reserve,))?)
+            .call_and_wait()
+            .await;
+
+        let (succeeded, transferred, should_retry_higher) = match transfer_result {
+            Ok(response) => {
+                let (result,): (Result<u128, String>,) = candid::decode_one(&response)
+                    .map_err(|e| anyhow::anyhow!("failed to decode transfer result: {}", e))?;
+                match result {
+                    Ok(amount) => (true, amount, false),
+                    Err(e) => {
+                        let is_ooce = is_out_of_cycles_error(&e);
+                        if is_ooce {
+                            println!(
+                                "  \u{26A0} return returned out-of-cycles with reserve {}B: {}",
+                                reserve / 1_000_000_000,
+                                e
+                            );
+                            (false, 0, true)
+                        } else {
+                            println!("  \u{26A0} return_cycle_balance returned error: {}", e);
+                            (false, 0, false)
+                        }
+                    }
                 }
             }
-        }
-        Err(e) => {
-            println!("  ⚠ return_cycle_balance call failed: {}", e);
-            0
-        }
-    };
+            Err(e) => {
+                let estr = e.to_string();
+                let is_ooce = is_out_of_cycles_error(&estr);
+                if is_ooce {
+                    println!(
+    	                    "  \u{26A0} return_cycle_balance call failed (out of cycles) with reserve {}B: {}",
+    	                    reserve / 1_000_000_000,
+    	                    e
+    	                );
+                    (false, 0, true)
+                } else {
+                    println!("  \u{26A0} return_cycle_balance call failed: {}", e);
+                    (false, 0, false)
+                }
+            }
+        };
 
-    if cycles_transferred > 0 {
-        println!(
-            "  ✓ transferred {} TC to platform_orchestrator",
-            format_cycles(cycles_transferred)
-        );
+        if succeeded {
+            cycles_transferred = transferred;
+            println!(
+                "  \u{2713} transferred {} TC to platform_orchestrator (reserve={}B)",
+                format_cycles(cycles_transferred),
+                reserve / 1_000_000_000
+            );
+            break;
+        }
+
+        if !should_retry_higher {
+            cycles_transferred = transferred; // 0
+            break;
+        }
+
+        reserve += 10_000_000_000;
+        if reserve > max_reserve {
+            println!(
+    	            "  \u{26A0} exhausted reserve retries up to 100B; 0 transferred (will proceed to uninstall/lockdown)"
+    	        );
+            break;
+        }
     }
+
+    // (no extra print here; success path already logged the ✓ above)
 
     // Step 7: Final uninstall.
     let uninstall_arg = encode_args((CanisterIdRecord { canister_id },))?;
@@ -645,6 +752,14 @@ async fn harvest_canister(
 fn format_cycles(cycles: u128) -> String {
     let trillions = cycles as f64 / 1_000_000_000_000.0;
     format!("{:.2}", trillions)
+}
+
+fn is_out_of_cycles_error(s: &str) -> bool {
+    let s = s.to_lowercase();
+    s.contains("out of cycles")
+        || s.contains("ic0504")
+        || (s.contains("cycles") && s.contains("out"))
+        || s.contains("couldn't send message")
 }
 
 // ── Helper types for PO API responses ─────────────────────────────────────────
