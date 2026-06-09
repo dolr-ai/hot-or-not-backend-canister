@@ -7,7 +7,7 @@ use ic_stable_structures::{storable::Bound, Storable};
 pub struct StorablePrincipal(pub Principal);
 
 impl Storable for StorablePrincipal {
-    fn to_bytes(&self) -> Cow<[u8]> {
+    fn to_bytes(&'_ self) -> Cow<'_, [u8]> {
         Cow::Owned(Encode!(self).unwrap())
     }
 
@@ -15,8 +15,8 @@ impl Storable for StorablePrincipal {
         Decode!(bytes.as_ref(), Self).unwrap()
     }
 
-    const BOUND: Bound = Bound::Bounded { 
-        max_size: 38, 
-        is_fixed_size: true 
+    const BOUND: Bound = Bound::Bounded {
+        max_size: 38,
+        is_fixed_size: true,
     };
 }

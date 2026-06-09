@@ -133,7 +133,6 @@ mod test {
     fn test_cycles_required_for_upgrade_for_idle_canister() {
         let (threshold, recharge) =
             calculate_threshold_and_recharge_cycles_for_canister(27_000_000, 0, None);
-        let cycles_required_for_upgrade = calculate_required_cycles_for_upgrading(27_000_000, None);
         assert!(recharge > threshold);
         assert!(recharge < MAX_AMOUNT_OF_RECHARGE_FOR_INDIVIDUAL_CANISTER);
     }
@@ -146,8 +145,7 @@ mod test {
             0,
             None,
         );
-        let cycles_required_for_upgrade =
-            calculate_required_cycles_for_upgrading(idle_cycles_burned_per_day, None);
+
         assert!(recharge > threshold);
         assert!(recharge < MAX_AMOUNT_OF_RECHARGE_FOR_INDIVIDUAL_CANISTER);
     }
@@ -161,8 +159,7 @@ mod test {
             reserved_cycles,
             None,
         );
-        let cycles_required_for_upgrade =
-            calculate_required_cycles_for_upgrading(idle_cycles_burned_per_day, None);
+
         assert!(recharge > threshold);
         assert!(recharge < MAX_AMOUNT_OF_RECHARGE_FOR_INDIVIDUAL_CANISTER);
     }

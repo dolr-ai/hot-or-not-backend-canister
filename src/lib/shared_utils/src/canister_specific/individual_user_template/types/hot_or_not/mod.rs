@@ -204,10 +204,9 @@ pub struct BetDetails {
     #[serde(default)]
     pub bet_maker_informed_status: Option<BetMakerInformedStatus>,
 }
-const MAX_BET_DETAILS_VALUE_SIZE: u32 = 200 as u32;
 
 impl Storable for BetDetails {
-    fn to_bytes(&self) -> std::borrow::Cow<[u8]> {
+    fn to_bytes(&'_ self) -> std::borrow::Cow<'_, [u8]> {
         Cow::Owned(Encode!(self).unwrap())
     }
 
@@ -230,7 +229,7 @@ impl Default for StablePrincipal {
 }
 
 impl Storable for StablePrincipal {
-    fn to_bytes(&self) -> std::borrow::Cow<[u8]> {
+    fn to_bytes(&'_ self) -> std::borrow::Cow<'_, [u8]> {
         Cow::Owned(Encode!(self).unwrap())
     }
 
@@ -263,7 +262,7 @@ pub type BetMakerPrincipal = StablePrincipal;
 pub struct GlobalRoomId(pub PostId, pub SlotId, pub RoomId);
 
 impl Storable for GlobalRoomId {
-    fn to_bytes(&self) -> std::borrow::Cow<[u8]> {
+    fn to_bytes(&'_ self) -> std::borrow::Cow<'_, [u8]> {
         Cow::Owned(Encode!(self).unwrap())
     }
 
@@ -283,7 +282,7 @@ impl Storable for GlobalRoomId {
 pub struct GlobalBetId(pub GlobalRoomId, pub BetMakerPrincipal);
 
 impl Storable for GlobalBetId {
-    fn to_bytes(&self) -> std::borrow::Cow<[u8]> {
+    fn to_bytes(&'_ self) -> std::borrow::Cow<'_, [u8]> {
         Cow::Owned(Encode!(self).unwrap())
     }
 

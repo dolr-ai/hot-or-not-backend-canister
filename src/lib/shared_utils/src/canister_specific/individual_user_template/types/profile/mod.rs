@@ -6,8 +6,9 @@ use serde::{
 };
 use std::marker::PhantomData;
 
-use crate::canister_specific::user_info_service::types::{NSFWInfo, ProfilePictureData, SubscriptionPlan};
-use serde::Deserializer;
+use crate::canister_specific::user_info_service::types::{
+    NSFWInfo, ProfilePictureData, SubscriptionPlan,
+};
 
 use super::migration::MigrationInfo;
 
@@ -409,13 +410,22 @@ mod tests {
             from_reader(bytes.as_slice()).expect("Failed to deserialize profile");
 
         // Verify migration: profile_picture should be created from profile_picture_url
-        assert!(new_profile.profile_picture.is_some(), "profile_picture should be migrated from profile_picture_url");
+        assert!(
+            new_profile.profile_picture.is_some(),
+            "profile_picture should be migrated from profile_picture_url"
+        );
         let profile_picture = new_profile.profile_picture.unwrap();
         assert_eq!(profile_picture.url, "https://example.com/pic.jpg");
-        assert!(!profile_picture.nsfw_info.is_nsfw, "is_nsfw should default to false");
+        assert!(
+            !profile_picture.nsfw_info.is_nsfw,
+            "is_nsfw should default to false"
+        );
         assert_eq!(profile_picture.nsfw_info.nsfw_ec, "");
         assert_eq!(profile_picture.nsfw_info.nsfw_gore, "");
-        assert!(!profile_picture.nsfw_info.csam_detected, "csam_detected should default to false");
+        assert!(
+            !profile_picture.nsfw_info.csam_detected,
+            "csam_detected should default to false"
+        );
 
         // Verify other fields are preserved
         assert_eq!(new_profile.bio, Some("Test bio".to_string()));
@@ -455,7 +465,10 @@ mod tests {
         assert!(deserialized.profile_picture.is_some());
         let profile_picture = deserialized.profile_picture.unwrap();
         assert_eq!(profile_picture.url, "https://example.com/pic.jpg");
-        assert!(profile_picture.nsfw_info.is_nsfw, "is_nsfw should be preserved as true");
+        assert!(
+            profile_picture.nsfw_info.is_nsfw,
+            "is_nsfw should be preserved as true"
+        );
         assert_eq!(profile_picture.nsfw_info.nsfw_ec, "explicit");
         assert_eq!(profile_picture.nsfw_info.nsfw_gore, "none");
         assert!(!profile_picture.nsfw_info.csam_detected);
@@ -483,6 +496,9 @@ mod tests {
             from_reader(bytes.as_slice()).expect("Failed to deserialize profile");
 
         // Verify: profile_picture should be None since profile_picture_url was None
-        assert!(new_profile.profile_picture.is_none(), "profile_picture should be None when profile_picture_url is None");
+        assert!(
+            new_profile.profile_picture.is_none(),
+            "profile_picture should be None when profile_picture_url is None"
+        );
     }
 }

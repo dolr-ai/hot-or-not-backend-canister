@@ -48,7 +48,7 @@ pub struct PropertyRateLimitConfig {
 }
 
 impl Storable for PropertyRateLimitConfig {
-    fn to_bytes(&self) -> Cow<[u8]> {
+    fn to_bytes(&'_ self) -> Cow<'_, [u8]> {
         let mut bytes = Vec::new();
         ciborium::ser::into_writer(self, &mut bytes)
             .expect("Failed to serialize PropertyRateLimitConfig");
@@ -114,7 +114,7 @@ impl RateLimitKey {
 }
 
 impl Storable for RateLimitKey {
-    fn to_bytes(&self) -> Cow<[u8]> {
+    fn to_bytes(&'_ self) -> Cow<'_, [u8]> {
         let mut bytes = Vec::new();
         ciborium::ser::into_writer(self, &mut bytes).expect("Failed to serialize RateLimitKey");
         Cow::Owned(bytes)
@@ -135,7 +135,7 @@ pub struct RateLimitEntry {
 }
 
 impl Storable for RateLimitEntry {
-    fn to_bytes(&self) -> Cow<[u8]> {
+    fn to_bytes(&'_ self) -> Cow<'_, [u8]> {
         let mut bytes = Vec::new();
         ciborium::ser::into_writer(self, &mut bytes).expect("Failed to serialize RateLimitEntry");
         Cow::Owned(bytes)
@@ -161,7 +161,7 @@ impl VideoGenRequestKey {
 }
 
 impl Storable for VideoGenRequestKey {
-    fn to_bytes(&self) -> Cow<[u8]> {
+    fn to_bytes(&'_ self) -> Cow<'_, [u8]> {
         let mut bytes = Vec::new();
         ciborium::ser::into_writer(self, &mut bytes)
             .expect("Failed to serialize VideoGenRequestKey");
@@ -196,7 +196,7 @@ pub struct VideoGenRequest {
 }
 
 impl Storable for VideoGenRequest {
-    fn to_bytes(&self) -> Cow<[u8]> {
+    fn to_bytes(&'_ self) -> Cow<'_, [u8]> {
         let mut bytes = Vec::new();
         ciborium::ser::into_writer(self, &mut bytes).expect("Failed to serialize VideoGenRequest");
         Cow::Owned(bytes)

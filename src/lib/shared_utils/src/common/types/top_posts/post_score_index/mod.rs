@@ -1,15 +1,12 @@
-use candid::{CandidType, Deserialize, Principal};
+use candid::{CandidType, Deserialize};
 use serde::Serialize;
-use serde_json_any_key::*;
 use std::{
     collections::{
-        btree_map::{self, Iter},
+        btree_map::{self},
         BTreeMap, HashMap,
     },
-    iter::{Chain, Rev},
-    slice,
-    time::{Duration, SystemTime},
-    vec,
+    iter::Rev,
+    slice, vec,
 };
 
 use crate::common::types::top_posts::post_score_index_item::PostScoreIndexItem;
@@ -75,7 +72,7 @@ impl PostScoreIndex {
         }
     }
 
-    pub fn iter(&self) -> PostScoreIndexIterator {
+    pub fn iter(&'_ self) -> PostScoreIndexIterator<'_> {
         PostScoreIndexIterator {
             inner: self.items_sorted_by_score.iter().rev(),
             current_vec: None,

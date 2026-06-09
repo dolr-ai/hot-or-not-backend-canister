@@ -45,7 +45,7 @@ use crate::{
         harvest_counts, mark_harvest_failed, mark_harvested, open_pool, pending_harvest_count,
         pending_harvests, total_controlled_count, DB_PATH,
     },
-    sns_types::{INSTALL_MODE_INSTALL, PLATFORM_ORCHESTRATOR_ID},
+    sns_types::PLATFORM_ORCHESTRATOR_ID,
 };
 
 /// IC management canister.
@@ -166,24 +166,81 @@ async fn harvest_canister(
         .call_and_wait()
         .await;
 
-    if let Err(e) = exists_res {
-        println!("  [debug] raw canister_status error (Debug): {:?}", e);
-        let estr = e.to_string();
-        println!("  [debug] raw canister_status error (to_string): {}", estr);
-
-        // Print the exact replica error instead of replacing with our user-friendly message
-        return Err(anyhow::anyhow!(
-            "early canister_status on management canister failed for {}: {}",
-            canister_id,
-            estr
-        ));
+    // Handle the case where a prior successful harvest left the canister with *only* the
+    // Platform Orchestrator as controller. The early direct management canister_status
+    // (our existence + pre-state gate) will then fail with an IC0512 "Only the controllers"
+    // rejection. In that situation we ask the PO (which is the sole controller) to add our
+    // actions principal as a co-controller, then immediately retry the same direct
+    // canister_status. After that we fall through to the normal "Step 2" add + verify,
+    // which will be a harmless idempotent second add.
+    fn is_controller_only_error(s: &str) -> bool {
+        s.contains("Only the controllers of the canister")
+            || s.contains("can control it")
+            || s.contains("IC0512")
+            || s.contains("add the current caller as a controller")
     }
 
-    // The early management canister_status call succeeded.
+    let exists_response = match exists_res {
+        Ok(resp) => resp,
+        Err(e) => {
+            println!("  [debug] raw canister_status error (Debug): {:?}", e);
+            let estr = e.to_string();
+            println!("  [debug] raw canister_status error (to_string): {}", estr);
+
+            if is_controller_only_error(&estr) {
+                println!(
+	                    "  \u{26a0} early canister_status rejected with 'only controllers' error \
+	                     (PO is the sole controller from a prior harvest). Calling platform_orchestrator \
+	                     add_our_identity_as_controller to grant ourselves co-controller rights, then \
+	                     retrying the management canister_status..."
+	                );
+                let add_ctrl_arg = encode_args((canister_id,))?;
+                agent
+                    .update(&po, "add_our_identity_as_controller")
+                    .with_arg(add_ctrl_arg)
+                    .call_and_wait()
+                    .await
+                    .map_err(|ae| {
+                        anyhow::anyhow!("recovery add_our_identity_as_controller failed: {}", ae)
+                    })?;
+                println!(
+                    "  \u{2713} recovery add_our_identity_as_controller succeeded; \
+	                     re-issuing early canister_status (now as co-controller)"
+                );
+
+                // Retry the exact same direct management call that just failed.
+                let retry_arg = Encode!(&id_record)?;
+                agent
+                    .update(
+                        &Principal::from_text(MANAGEMENT_CANISTER).unwrap(),
+                        "canister_status",
+                    )
+                    .with_arg(retry_arg)
+                    .with_effective_canister_id(canister_id)
+                    .call_and_wait()
+                    .await
+                    .map_err(|ae| {
+                        anyhow::anyhow!(
+                            "early canister_status retry after recovery add failed for {}: {}",
+                            canister_id,
+                            ae
+                        )
+                    })?
+            } else {
+                // Print the exact replica error instead of replacing with our user-friendly message
+                return Err(anyhow::anyhow!(
+                    "early canister_status on management canister failed for {}: {}",
+                    canister_id,
+                    estr
+                ));
+            }
+        }
+    };
+
+    // The early (or recovery-retried) management canister_status call succeeded.
     // Decode it now to get the pre-state (balance, reserved_cycles, status).
     // This replaces the previous redundant PO get_controllers_and_cycle_balance call for pre-state.
     // We already paid the roundtrip for the existence gate; no need to call PO again just for data.
-    let exists_response = exists_res.unwrap(); // safe: we returned on Err above
     let status: CanisterStatusResult = candid::decode_one(&exists_response)
         .map_err(|e| anyhow::anyhow!("failed to decode early canister_status: {}", e))?;
 
@@ -434,7 +491,47 @@ async fn harvest_canister(
         .call_and_wait()
         .await
         .map_err(|e| anyhow::anyhow!("install_code failed: {}", e))?;
-    println!("  ✓ wasm installed");
+    println!("  \u{2713} wasm installed");
+
+    // Immediately after install, fetch status directly from management canister
+    // to see the exact cycle consumption of the install itself.
+    // This lets us validate how much the install actually burned.
+    let post_install_id_record = CanisterIdRecord { canister_id };
+    let post_install_arg = Encode!(&post_install_id_record)?;
+    let post_install_res = agent
+        .update(
+            &Principal::from_text(MANAGEMENT_CANISTER).unwrap(),
+            "canister_status",
+        )
+        .with_arg(post_install_arg)
+        .with_effective_canister_id(canister_id)
+        .call_and_wait()
+        .await
+        .map_err(|e| anyhow::anyhow!("post-install canister_status failed: {}", e))?;
+
+    let post_install_status: CanisterStatusResult = candid::decode_one(&post_install_res)
+        .map_err(|e| anyhow::anyhow!("failed to decode post-install canister_status: {}", e))?;
+
+    let cycles_big = post_install_status.cycles.0.clone();
+    let post_install_balance: u128 = cycles_big.clone().try_into().unwrap_or_else(|_| {
+        cycles_big
+            .iter_u64_digits()
+            .fold(0u128, |acc, d| (acc << 64) | u128::from(d))
+    });
+
+    let reserved_big = post_install_status.reserved_cycles.0.clone();
+    let post_install_reserved: u128 = reserved_big.clone().try_into().unwrap_or_else(|_| {
+        reserved_big
+            .iter_u64_digits()
+            .fold(0u128, |acc, d| (acc << 64) | u128::from(d))
+    });
+
+    println!(
+        "  post_install_balance: {} TC, post_install_reserved: {} TC, status: {:?}",
+        format_cycles(post_install_balance),
+        format_cycles(post_install_reserved),
+        post_install_status.status
+    );
 
     // Step 6: Transfer cycles to PO.
     let transfer_result = agent

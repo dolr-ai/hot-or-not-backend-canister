@@ -136,7 +136,7 @@ impl Post {
 impl Storable for Post {
     const BOUND: Bound = Bound::Unbounded;
 
-    fn to_bytes(&self) -> Cow<[u8]> {
+    fn to_bytes(&'_ self) -> Cow<'_, [u8]> {
         let mut bytes = vec![];
         ciborium::ser::into_writer(self, &mut bytes).unwrap();
         Cow::Owned(bytes)
@@ -153,7 +153,7 @@ pub struct PostIdList(pub Vec<u64>);
 impl Storable for PostIdList {
     const BOUND: Bound = Bound::Unbounded;
 
-    fn to_bytes(&self) -> Cow<[u8]> {
+    fn to_bytes(&'_ self) -> Cow<'_, [u8]> {
         let mut bytes = vec![];
         ciborium::ser::into_writer(self, &mut bytes).unwrap();
         Cow::Owned(bytes)
@@ -217,7 +217,7 @@ impl PostIdStringList {
 impl Storable for PostIdStringList {
     const BOUND: Bound = Bound::Unbounded;
 
-    fn to_bytes(&self) -> Cow<[u8]> {
+    fn to_bytes(&'_ self) -> Cow<'_, [u8]> {
         let mut bytes = vec![];
         ciborium::ser::into_writer(self, &mut bytes).unwrap();
         Cow::Owned(bytes)

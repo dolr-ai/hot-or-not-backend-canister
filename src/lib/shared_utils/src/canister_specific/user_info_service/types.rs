@@ -1,5 +1,3 @@
-use std::default;
-
 use candid::{CandidType, Deserialize, Principal};
 use serde::Serialize;
 

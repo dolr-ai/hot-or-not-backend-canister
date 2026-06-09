@@ -3,9 +3,7 @@ use serde::Serialize;
 use std::{
     collections::{btree_map::Iter, BTreeMap, HashMap},
     iter::{Chain, Rev},
-    slice,
-    time::{Duration, SystemTime},
-    vec,
+    slice, vec,
 };
 
 use crate::common::utils::system_time::get_current_system_time;
@@ -118,7 +116,7 @@ impl PostScoreHotOrNotIndex {
         old_item
     }
 
-    pub fn iter(&self) -> PostScoreHotOrNotIndexIterator {
+    pub fn iter(&'_ self) -> PostScoreHotOrNotIndexIterator<'_> {
         let latest_iter = self.items_latest_sorted_by_score.iter();
         let old_iter = self.items_sorted_by_score.iter();
 

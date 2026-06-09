@@ -2,7 +2,6 @@ use std::collections::BTreeMap;
 
 use candid::{CandidType, Deserialize};
 use serde::Serialize;
-use serde_json_any_key::*;
 
 use crate::common::types::utility_token::token_event::{
     HotOrNotOutcomePayoutEvent, MintEvent, PumpDumpOutcomePayoutEvent, StakeEvent, TokenEvent,
@@ -52,9 +51,9 @@ impl TokenTransactions for TokenBalance {
                     self.utility_token_balance += bet_amount;
                 }
                 StakeEvent::BetOnPumpDump {
-                    pumps,
-                    dumps,
-                    root_canister_id,
+                    pumps: _pumps,
+                    dumps: _dumps,
+                    root_canister_id: _root_canister_id,
                 } => {
                     self.utility_token_balance -= amount;
                 }

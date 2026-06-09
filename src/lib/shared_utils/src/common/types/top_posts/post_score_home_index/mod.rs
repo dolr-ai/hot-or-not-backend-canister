@@ -2,13 +2,11 @@ use candid::{CandidType, Deserialize};
 use serde::Serialize;
 use std::{
     collections::{btree_map::Iter, BTreeMap, HashMap},
-    iter::{Chain, Rev},
-    slice,
-    time::{Duration, SystemTime},
-    vec,
+    iter::Rev,
+    slice, vec,
 };
 
-use super::{post_score_index_item::PostScoreIndexItemV1, CreatedAt, GlobalPostId, Score};
+use super::{post_score_index_item::PostScoreIndexItemV1, GlobalPostId, Score};
 
 #[derive(Default, Debug, Clone, CandidType, Deserialize, Serialize)]
 pub struct PostScoreHomeIndex {
@@ -59,7 +57,7 @@ impl PostScoreHomeIndex {
         old_item
     }
 
-    pub fn iter(&self) -> PostScoreHomeIndexIterator {
+    pub fn iter(&'_ self) -> PostScoreHomeIndexIterator<'_> {
         PostScoreHomeIndexIterator {
             id_to_item: &self.item_presence_index,
             inner: self.items_sorted_by_score.iter().rev(),
@@ -116,6 +114,8 @@ impl FromIterator<PostScoreIndexItemV1> for PostScoreHomeIndex {
 
 #[cfg(test)]
 mod tests {
+    use std::time::{Duration, SystemTime};
+
     use candid::Principal;
 
     use crate::common::types::top_posts::post_score_index_item::PostStatus;

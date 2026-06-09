@@ -1,9 +1,6 @@
 use ic_cdk::api;
 use std::time::SystemTime;
-use std::{
-    cell::RefCell,
-    time::{Duration, UNIX_EPOCH},
-};
+use std::time::{Duration, UNIX_EPOCH};
 
 pub type SystemTimeProvider = dyn Fn() -> SystemTime;
 
