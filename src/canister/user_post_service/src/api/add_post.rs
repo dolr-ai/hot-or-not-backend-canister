@@ -1,6 +1,5 @@
 use crate::CANISTER_DATA;
 use ic_cdk_macros::update;
-use shared_utils::canister_specific::individual_user_template::types::post::Post;
 use shared_utils::canister_specific::user_post_service::types::args::{
     PostDetailsFromFrontend, PostDetailsFromFrontendV1,
 };

@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use crate::{
     util::canister_management::{
         check_and_request_cycles_from_platform_orchestrator, install_canister_wasm,
-        provision_number_of_empty_canisters, recharge_canister_for_installing_wasm,
+        recharge_canister_for_installing_wasm,
     },
     CANISTER_DATA,
 };
@@ -20,7 +20,6 @@ use shared_utils::{
         utils::task::run_task_concurrently,
     },
     constant::{
-        get_backup_individual_user_canister_batch_size,
         get_individual_user_canister_subnet_batch_size,
         get_individual_user_canister_subnet_threshold,
     },

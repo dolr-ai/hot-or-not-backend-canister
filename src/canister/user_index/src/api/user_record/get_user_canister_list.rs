@@ -1,6 +1,5 @@
 use candid::Principal;
 use ic_cdk_macros::query;
-use shared_utils::common::utils::permissions::is_reclaim_canister_id;
 
 use crate::CANISTER_DATA;
 

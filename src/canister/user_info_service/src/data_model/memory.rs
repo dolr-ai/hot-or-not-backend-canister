@@ -25,9 +25,3 @@ pub fn get_upgrades_memory() -> Memory {
 pub fn get_user_info_memory() -> Memory {
     MEMORY_MANAGER.with_borrow_mut(|m| m.get(USER_INFO_MEMORY))
 }
-
-pub fn init_memory_manager() {
-    MEMORY_MANAGER.with(|m| {
-        *m.borrow_mut() = MemoryManager::init_with_bucket_size(DefaultMemoryImpl::default(), 1);
-    })
-}

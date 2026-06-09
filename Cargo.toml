@@ -16,9 +16,10 @@ members = [
 ]
 
 [workspace.dependencies]
-candid = "0.10.2"
+candid = "0.10.29"
 ciborium = "0.2.1"
 pocket-ic = "6.0.0"
+ic-agent = { version = "0.47.3", features = ["pem"] }
 ic-cdk = "0.15.1"
 ic-cdk-timers = "0.7.0"
 ic-cdk-macros = "0.16.0"

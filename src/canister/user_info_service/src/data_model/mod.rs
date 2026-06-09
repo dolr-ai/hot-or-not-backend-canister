@@ -102,7 +102,7 @@ impl UserInfo {
 }
 
 impl Storable for UserInfo {
-    fn to_bytes(&self) -> std::borrow::Cow<[u8]> {
+    fn to_bytes(&'_ self) -> std::borrow::Cow<'_, [u8]> {
         let mut bytes = vec![];
         ser::into_writer(self, &mut bytes).unwrap();
         Cow::Owned(bytes)
@@ -399,16 +399,6 @@ impl CanisterData {
         }
     }
 
-    pub fn get_bots_by_owner(&self, owner: Principal) -> Vec<Principal> {
-        self.user_infos
-            .get(&owner)
-            .and_then(|info| match &info.account_type {
-                UserAccountType::MainAccount { bots } => Some(bots.clone()),
-                UserAccountType::BotAccount { .. } => None,
-            })
-            .unwrap_or_default()
-    }
-
     pub fn follow_user(&mut self, follower: Principal, target: Principal) -> Result<(), String> {
         if follower == target {
             return Err("Cannot follow yourself".to_string());
@@ -677,10 +667,7 @@ impl CanisterData {
             .get(&bot_principal)
             .ok_or("Bot principal not found")?;
 
-        let mut owner_info = self
-            .user_infos
-            .get(&owner)
-            .ok_or("Owner not found")?;
+        let mut owner_info = self.user_infos.get(&owner).ok_or("Owner not found")?;
 
         match &mut owner_info.account_type {
             UserAccountType::MainAccount { bots } => {
@@ -782,7 +769,7 @@ impl CanisterData {
         for user in users {
             match self.get_profile_details_for_user_v7(user, caller_principal) {
                 Ok(profile) => profiles.push(profile),
-                Err(e) => {}
+                Err(_e) => {}
             }
         }
         Ok(profiles)

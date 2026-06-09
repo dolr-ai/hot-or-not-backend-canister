@@ -13,8 +13,7 @@ use shared_utils::canister_specific::user_info_service::types::SubscriptionPlan;
 
 use crate::data_model::CanisterData;
 use shared_utils::canister_specific::user_info_service::types::{
-    FollowersResponse, FollowingResponse, NSFWInfo, ProfilePictureData, ProfileUpdateDetails,
-    ProfileUpdateDetailsV2,
+    FollowersResponse, FollowingResponse, NSFWInfo, ProfileUpdateDetails, ProfileUpdateDetailsV2,
 };
 
 mod api;

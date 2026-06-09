@@ -1,5 +1,4 @@
 use candid::Principal;
-use ic_cdk::caller;
 use ic_cdk_macros::query;
 use shared_utils::canister_specific::individual_user_template::types::session::SessionType;
 

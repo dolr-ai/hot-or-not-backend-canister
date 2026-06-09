@@ -1,7 +1,5 @@
-use std::borrow::BorrowMut;
-
 use candid::Principal;
-use ic_cdk::{call, notify};
+use ic_cdk::call;
 use ic_cdk_macros::update;
 use shared_utils::{
     canister_specific::user_index::types::BroadcastCallStatus,

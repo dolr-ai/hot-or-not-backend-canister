@@ -1,4 +1,4 @@
-use candid::{CandidType, Principal};
+use candid::Principal;
 use futures::{future::BoxFuture, FutureExt};
 use ic_cdk::{
     api::{
@@ -8,14 +8,13 @@ use ic_cdk::{
         management_canister::{
             main::{
                 self, canister_info, canister_status, CanisterInfoRequest, CanisterInstallMode,
-                CreateCanisterArgument, InstallCodeArgument, WasmModule,
+                CreateCanisterArgument, InstallCodeArgument,
             },
             provisional::{CanisterIdRecord, CanisterSettings},
         },
     },
     call,
 };
-use serde::{Deserialize, Serialize};
 use shared_utils::{
     canister_specific::individual_user_template::types::arg::IndividualUserTemplateInitArgs,
     common::{
@@ -29,25 +28,7 @@ use shared_utils::{
     cycles::calculate_required_cycles_for_upgrading,
 };
 
-use crate::{data_model::configuration::Configuration, CANISTER_DATA};
-
-#[derive(
-    CandidType, Serialize, Deserialize, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone,
-)]
-struct CustomInstallCodeArgument {
-    /// See [CanisterInstallMode].
-    pub mode: CanisterInstallMode,
-    /// Principle of the canister.
-    pub canister_id: Principal,
-    /// Code to be installed.
-    pub wasm_module: WasmModule,
-    /// The argument to be passed to `canister_init` or `canister_post_upgrade`.
-    pub arg: Vec<u8>,
-    /// sender_canister_version must be set to ic_cdk::api::canister_version()
-    pub sender_canister_version: Option<u64>,
-    /// drop stable memory after install/upgrade execution.
-    pub unsafe_drop_stable_memory: Option<bool>,
-}
+use crate::CANISTER_DATA;
 
 pub async fn create_users_canister(
     profile_owner: Option<Principal>,
@@ -55,8 +36,12 @@ pub async fn create_users_canister(
     individual_user_wasm: Vec<u8>,
 ) -> Principal {
     let canister_id = create_empty_user_canister().await;
-    recharge_canister_for_installing_wasm(canister_id).await;
-    install_canister_wasm(canister_id, profile_owner, version, individual_user_wasm).await;
+    recharge_canister_for_installing_wasm(canister_id)
+        .await
+        .expect("Failed");
+    install_canister_wasm(canister_id, profile_owner, version, individual_user_wasm)
+        .await
+        .expect("Failed");
     canister_id
 }
 

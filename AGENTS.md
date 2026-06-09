@@ -41,7 +41,6 @@ These are retained for supporting tasks (Candid, deps, snapshots). They are **no
 | `scripts/run-canister-test-suite.sh` | Full (non-ignored) test suite |
 | `scripts/generate-candid.sh` | Rebuild wasm(s) and regenerate `can.did` (still invoked from some task_runner paths) |
 | `scripts/canister_snapshot.sh` | Canister snapshot operations (take / list / load) |
-| `scripts/snapshot-po-state.sh` | Operator tool to refresh `po_controlled_canisters` snapshot data (contains DROP; operator-only, see SQL rules below) |
 
 Other scripts (`release-and-submit-proposals.sh`, `deploy-local.sh`, `upgrade_ic_repl.sh`, etc.) are legacy for PO lifecycle and should not be used for new deployments or upgrades. They are kept in-tree only for reference / audit.
 
@@ -198,11 +197,11 @@ Verify after deployment:
    - For task_runner tables (decommissioned, cycle_harvested, release_counter, etc.): run the ignored bootstrap test:
      `cargo test -p task_runner -- --ignored bootstrap_schema --nocapture`
    - For snapshot tables (canisters, controllers, progress): run the corresponding ignored populate test.
-   - For tables populated by external operator scripts such as `po_controlled_canisters` (created by `scripts/snapshot-po-state.sh`): use a pure additive sqlite3 command, for example:
+   - For the `po_controlled_canisters` source list (the authoritative list of PO-controlled individual user canisters for harvesting): it is now treated as static/manual data in the DB (populated once externally). Maintain it with direct additive SQL (INSERT OR IGNORE / DELETE specific rows) or future dedicated task_runner entry points. Use only additive commands:
      ```
      sqlite3 ic_canisters.db "CREATE TABLE IF NOT EXISTS po_controlled_canisters (principal TEXT PRIMARY KEY);"
+     sqlite3 ic_canisters.db "INSERT OR IGNORE INTO po_controlled_canisters (principal) VALUES ('z7bpd-waaaa-aaaag-acogq-cai');"
      ```
-     **Never** run the snapshot-po-state.sh (or any other script) if it would DROP tables, unless you have received explicit "yes, you may drop" confirmation from the operator in this conversation for this specific operation.
 3. Then populate / refresh the compile-time query cache:
    ```
    DATABASE_URL=sqlite:<absolute-path-to-ic_canisters.db> cargo sqlx prepare --workspace
@@ -213,7 +212,7 @@ The `.sqlx/` cache **must** be checked into version control.
 
 If a prepare fails with "no database rows" or "unknown column" errors, the tables were not present in the DATABASE_URL database at prepare time — re-run the appropriate bootstrap / additive create step first. Never "fix" this by writing a DROP-based reset.
 
-**Scripts that currently contain DROP statements (e.g. `scripts/snapshot-po-state.sh`)** are operator-only tools. When an agent needs to refresh the po_* data for prepare or testing purposes, it must propose running a non-destructive subset or ask the operator for permission before invoking any DROP-containing logic. The default is to use the minimal `CREATE TABLE IF NOT EXISTS` above.
+The `po_controlled_canisters` table (source list of canisters to harvest) is now considered static data managed directly in the SQLite DB alongside the harvest progress tables. No external snapshot script is used. Add/remove rows via direct SQL (additive) or via new task_runner helpers when needed.
 
 ## When to Update This File
 

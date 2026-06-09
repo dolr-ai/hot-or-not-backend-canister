@@ -1,26 +1,13 @@
-use std::{borrow::Cow, cmp::Ordering, collections::BTreeMap, time::SystemTime};
+use std::{borrow::Cow, collections::BTreeMap, time::SystemTime};
 
 use candid::{CandidType, Decode, Deserialize, Encode, Principal};
 use ic_cdk::api::{call::CallResult, management_canister::provisional::CanisterId};
-use ic_stable_structures::{
-    memory_manager::VirtualMemory, storable::Bound, DefaultMemoryImpl, Storable,
-};
+use ic_stable_structures::{storable::Bound, Storable};
 use serde::Serialize;
 
-use crate::common::types::{
-    app_primitive_type::PostId,
-    utility_token::token_event::{
-        HotOrNotOutcomePayoutEvent, TokenEvent, HOT_OR_NOT_BET_CREATOR_COMMISSION_PERCENTAGE,
-        HOT_OR_NOT_BET_WINNINGS_MULTIPLIER,
-    },
-};
+use crate::common::types::app_primitive_type::PostId;
 
-use super::{
-    arg::PlaceBetArg,
-    error::BetOnCurrentlyViewingPostError,
-    post::{FeedScore, Post},
-    token::TokenTransactions,
-};
+use super::{arg::PlaceBetArg, error::BetOnCurrentlyViewingPostError, post::FeedScore};
 
 pub trait HotOrNotGame {
     fn validate_incoming_bet(
@@ -162,7 +149,7 @@ impl Default for SlotDetailsV1 {
 const MAX_SLOT_DETAILS_VALUE_SIZE: u32 = 100 as u32;
 
 impl Storable for SlotDetailsV1 {
-    fn to_bytes(&self) -> std::borrow::Cow<[u8]> {
+    fn to_bytes(&'_ self) -> std::borrow::Cow<'_, [u8]> {
         Cow::Owned(Encode!(self).unwrap())
     }
 
@@ -186,7 +173,7 @@ pub struct RoomDetailsV1 {
 const MAX_ROOM_DETAILS_VALUE_SIZE: u32 = 100 as u32;
 
 impl Storable for RoomDetailsV1 {
-    fn to_bytes(&self) -> std::borrow::Cow<[u8]> {
+    fn to_bytes(&'_ self) -> std::borrow::Cow<'_, [u8]> {
         Cow::Owned(Encode!(self).unwrap())
     }
 

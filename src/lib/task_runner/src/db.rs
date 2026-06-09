@@ -320,6 +320,30 @@ pub async fn harvest_counts(pool: &SqlitePool) -> Result<(i64, i64)> {
     Ok((done, failed))
 }
 
+/// Total number of principals recorded in po_controlled_canisters (the source list
+/// from the last snapshot-po-state.sh run or equivalent).
+pub async fn total_controlled_count(pool: &SqlitePool) -> Result<i64> {
+    let n = sqlx::query_scalar!("SELECT COUNT(*) FROM po_controlled_canisters")
+        .fetch_one(pool)
+        .await?;
+    Ok(n)
+}
+
+/// Number of principals in po_controlled_canisters that have not yet been
+/// recorded in cycle_harvested (i.e. still need harvesting).
+pub async fn pending_harvest_count(pool: &SqlitePool) -> Result<i64> {
+    let n = sqlx::query_scalar!(
+        "SELECT COUNT(*)
+         FROM po_controlled_canisters p
+         WHERE NOT EXISTS (
+             SELECT 1 FROM cycle_harvested d WHERE d.principal = p.principal
+         )"
+    )
+    .fetch_one(pool)
+    .await?;
+    Ok(n)
+}
+
 /// Bootstrap test: creates the harvest tables (cycle_harvested, cycle_harvest_failures,
 /// decommissioned, etc.) **and** the po_* tables (po_controlled_canisters,
 /// po_subnet_orchestrators, po_metadata, po_decommission_failed) via additive

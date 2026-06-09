@@ -5,9 +5,9 @@ use ic_stable_structures::{memory_manager::VirtualMemory, DefaultMemoryImpl, Sta
 use serde::{Deserialize, Serialize};
 use shared_utils::{
     canister_specific::{
-        individual_user_template::types::{error::GetPostsOfUserProfileError, post},
+        individual_user_template::types::error::GetPostsOfUserProfileError,
         user_post_service::types::{
-            args::{FetchPostsResult, PostDetailsForFrontend, PostDetailsFromFrontend},
+            args::{FetchPostsResult, PostDetailsForFrontend},
             error::UserPostServiceError,
             storage::{Post, PostIdStringList},
         },

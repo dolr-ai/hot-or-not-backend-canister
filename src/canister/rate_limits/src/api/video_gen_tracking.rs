@@ -218,7 +218,7 @@ pub async fn create_video_generation_request_v1(
 /// Create a new video generation request v1 - with payment-aware rate limit logic
 /// For paid requests: checks property-wide limit only and increments property counter only
 /// For unpaid requests: checks both user and property limits, increments both counters
-
+#[allow(clippy::too_many_arguments)]
 #[update(guard = "is_caller_controller_or_global_admin")]
 pub async fn create_video_generation_request_v2(
     principal: Principal,
