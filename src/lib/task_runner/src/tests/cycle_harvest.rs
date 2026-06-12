@@ -55,14 +55,15 @@ use crate::{
 /// IC management canister.
 const MANAGEMENT_CANISTER: &str = "aaaaa-aa";
 
-/// Minimum balance (cycles) required after uninstall to proceed with reinstall + transfer.
-/// Must be high enough to cover:
-/// - wasm install cost (can be ~0.2 TC for template)
-/// - execution + deposit_cycles to PO inside return_cycle...
-/// - final uninstall + update_settings
-/// If below this after uninstall (i.e. for very low-balance PO-controlled canisters),
-/// we top up via PO's deposit_cycles_to_canister (recover most via the return call).
-const MIN_REINSTALL_BALANCE: u128 = 300_000_000_000; // 0.3 TC (raised after seeing 0.09 TC canisters fail install)
+// Minimum balance (cycles) required after uninstall to proceed with reinstall + transfer.
+// Must be high enough to cover:
+// - wasm install cost (can be ~0.2 TC for template)
+// - execution + deposit_cycles to PO inside return_cycle...
+// - final uninstall + update_settings
+// - canister-specific freezing thresholds and memory allocations
+// If below this after uninstall (i.e. for very low-balance PO-controlled canisters),
+// we top up via PO's deposit_cycles_to_canister (recover most via the return call).
+const MIN_REINSTALL_BALANCE: u128 = 1_000_000_000_000; // 1.0 TC (raised to safely cover freezing thresholds + install costs)
 
 /// Top-up amount when a canister's balance is too low to reinstall.
 /// We recover most of this back via return_cycle_balance, so still net positive.

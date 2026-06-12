@@ -73,10 +73,7 @@ pub async fn provision_number_of_empty_canisters(
     number_of_canisters: u64,
     breaking_condition: impl Fn() -> bool,
 ) {
-    let create_canister_futures = (0..number_of_canisters).map(|_| {
-        let future = create_empty_user_canister();
-        future
-    });
+    let create_canister_futures = (0..number_of_canisters).map(|_| create_empty_user_canister());
 
     let result_callback = |canister_id: Principal| {
         CANISTER_DATA.with_borrow_mut(|canister_data| {

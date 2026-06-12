@@ -387,11 +387,11 @@ impl CanisterData {
                     return Err("Unauthorized".to_string());
                 }
                 // Remove from owner's bots list
-                if let Some(mut owner_info) = self.user_infos.get(owner) {
-                    if let UserAccountType::MainAccount { bots } = &mut owner_info.account_type {
-                        bots.retain(|b| *b != principal_to_delete);
-                        self.user_infos.insert(*owner, owner_info);
-                    }
+                if let Some(mut owner_info) = self.user_infos.get(owner)
+                    && let UserAccountType::MainAccount { bots } = &mut owner_info.account_type
+                {
+                    bots.retain(|b| *b != principal_to_delete);
+                    self.user_infos.insert(*owner, owner_info);
                 }
                 self.user_infos.remove(&principal_to_delete);
                 Ok(())
@@ -907,7 +907,7 @@ impl CanisterData {
             UserAccountType::BotAccount { owner } => {
                 let mut main_account_user_info = self
                     .user_infos
-                    .get(&owner)
+                    .get(owner)
                     .ok_or("Main account not found for bot".to_string())?;
 
                 main_account_user_info.profile.subscription_plan = new_plan;
