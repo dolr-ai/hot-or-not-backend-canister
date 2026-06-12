@@ -27,6 +27,7 @@
 ///   cargo test -p task_runner -- --ignored upgrade_po_directly --nocapture
 ///   cargo test -p task_runner -- --ignored upgrade_po_and_ui_directly --nocapture
 ///   cargo test -p task_runner -- --ignored upgrade_all_directly --nocapture
+///   cargo test -p task_runner -- --ignored deploy_user_info_service_directly --nocapture
 use std::process::Command;
 
 use anyhow::{Context, Result};
@@ -133,17 +134,25 @@ fn get_canister_id(name: &str) -> Result<Principal> {
 }
 
 /// Upgrade a canister via dfx CLI (reliable for management canister calls).
-fn upgrade_canister_via_dfx(canister_name: &str, _wasm_path: &std::path::Path, version: &str) -> Result<()> {
+fn upgrade_canister_via_dfx(
+    canister_name: &str,
+    _wasm_path: &std::path::Path,
+    version: &str,
+) -> Result<()> {
     let root = workspace_root();
     println!("  Running dfx canister install --mode=upgrade {canister_name}...");
 
     let output = Command::new("dfx")
         .env("DFX_WARNING", "-mainnet_plaintext_identity")
         .args([
-            "canister", "install", "--mode=upgrade", canister_name,
+            "canister",
+            "install",
+            "--mode=upgrade",
+            canister_name,
             "--network=ic",
             "--yes",
-            "--argument", &format!("(record {{version=\"{version}\"}})"),
+            "--argument",
+            &format!("(record {{version=\"{version}\"}})"),
         ])
         .current_dir(&root)
         .output()
@@ -153,9 +162,7 @@ fn upgrade_canister_via_dfx(canister_name: &str, _wasm_path: &std::path::Path, v
     let stderr = String::from_utf8_lossy(&output.stderr);
 
     if !output.status.success() {
-        anyhow::bail!(
-            "dfx canister install failed:\nstdout: {stdout}\nstderr: {stderr}"
-        );
+        anyhow::bail!("dfx canister install failed:\nstdout: {stdout}\nstderr: {stderr}");
     }
 
     println!("  stdout: {}", stdout.trim());
@@ -297,4 +304,38 @@ async fn upgrade_po_and_ui_directly() -> Result<()> {
 #[ignore = "upgrades all canisters on mainnet — run explicitly"]
 async fn upgrade_all_directly() -> Result<()> {
     upgrade_fleet(ReleaseScope::All).await
+}
+
+// ── Deploy / upgrade user_info_service directly (controller identity) ─────
+
+/// Build + deploy (or upgrade) `user_info_service` directly to mainnet using the
+/// actions identity (must be a controller of the live canister).
+///
+/// This follows the same pattern as the fleet upgrades:
+/// - regenerates candid (scripts/generate-candid.sh)
+/// - builds via `dfx build --network=ic`
+/// - installs via `dfx canister install --mode=upgrade --network=ic`
+///   (passing the versioned init/upgrade arg that user_info_service expects)
+///
+/// Run with:
+///   cargo test -p task_runner -- --ignored deploy_user_info_service_directly --nocapture
+#[tokio::test]
+#[ignore = "deploys user_info_service to mainnet — run explicitly"]
+async fn deploy_user_info_service_directly() -> Result<()> {
+    println!("==> Regenerating Candid for user_info_service ...");
+    regenerate_candid(&["user_info_service"])?;
+
+    println!("==> Building user_info_service for mainnet ...");
+    let wasm_path = build_canister("user_info_service")?;
+
+    let version = timestamp_version();
+    println!("\nVersion: {version}");
+
+    println!("\n==> Deploying user_info_service to mainnet ...");
+    // For an existing canister this is an upgrade; for a brand-new id it would be install.
+    // user_info_service accepts (record { version : text }) on both init and post_upgrade.
+    upgrade_canister_via_dfx("user_info_service", &wasm_path, &version)?;
+
+    println!("\n✓ user_info_service deployed (version {version})");
+    Ok(())
 }

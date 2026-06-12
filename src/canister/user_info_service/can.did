@@ -13,12 +13,14 @@ type FollowingResponse = record {
   following : vec FollowerItem;
   total_count : nat64;
 };
+// NSFW information for content moderation
 type NSFWInfo = record {
   is_nsfw : bool;
   csam_detected : bool;
   nsfw_gore : text;
   nsfw_ec : text;
 };
+// Profile picture data with NSFW info
 type ProfilePictureData = record { url : text; nsfw_info : NSFWInfo };
 type ProfileUpdateDetails = record {
   bio : opt text;
@@ -32,6 +34,7 @@ type ProfileUpdateDetailsV2 = record {
 };
 type Result = variant { Ok; Err : text };
 type Result_1 = variant { Ok : FollowersResponse; Err : text };
+type Result_10 = variant { Ok : text; Err : text };
 type Result_2 = variant { Ok : FollowingResponse; Err : text };
 type Result_3 = variant { Ok : UserProfileDetailsForFrontendV4; Err : text };
 type Result_4 = variant { Ok : UserProfileDetailsForFrontendV3; Err : text };
@@ -115,9 +118,9 @@ service : (UserInfoServiceInitArgs) -> {
   accept_new_user_registration_v2 : (principal, bool, opt principal) -> (
       Result,
     );
-  convert_to_bot_account : (principal, principal) -> (Result);
   add_pro_plan_free_video_credits : (principal, nat32) -> (Result);
   change_subscription_plan : (principal, SubscriptionPlan) -> (Result);
+  convert_to_bot_account : (principal, principal) -> (Result);
   delete_user_info : (principal) -> (Result);
   follow_user : (principal) -> (Result);
   get_followers : (principal, opt principal, nat64, opt bool) -> (
@@ -137,10 +140,15 @@ service : (UserInfoServiceInitArgs) -> {
   register_new_user : () -> (Result);
   remove_pro_plan_free_video_credits : (principal, nat32) -> (Result);
   unfollow_user : (principal) -> (Result);
+  // Admin-only endpoint to update the AI influencer status for a user's profile
   update_profile_ai_influencer_status : (principal, bool) -> (Result);
   update_profile_details : (ProfileUpdateDetails) -> (Result);
   update_profile_details_v2 : (ProfileUpdateDetailsV2) -> (Result);
   update_profile_picture_nsfw_info : (principal, NSFWInfo) -> (Result);
   update_session_type : (principal, SessionType) -> (Result);
   update_user_last_access_time : (principal) -> (Result);
+  // SNS validator for the generic install_code nervous system function.
+  // Accepts any payload from the SNS governance canister and returns Ok so the
+  // SNS can pass raw install_code arguments through without Candid type-checking.
+  validate_install_code : (blob) -> (Result_10) query;
 }

@@ -1,48 +1,34 @@
-/// Local platform_orchestrator setup + harvest-method validation as a cargo test.
+/// Local canister setup + validation tests for task_runner (platform_orchestrator,
+/// user_info_service, and friends).
 ///
-/// This replaces the fragile bash + ic-repl logic that used to live in
+/// This file replaces the fragile bash + ic-repl logic that used to live in
 /// `scripts/deploy-local.sh` (and the corresponding parts of the release flow).
+/// The tests bring up a clean local dfx replica, run the candid generation step,
+/// build via dfx, and deploy so you can iterate and validate locally *before*
+/// running the corresponding mainnet deployment tests (see direct_upgrade.rs).
 ///
 /// Why this exists:
-/// - After the PO cleanup, `platform_orchestrator` only exposes the minimal
-///   surface needed for cycle harvesting (add_our_identity_as_controller,
-///   get_controllers_and_cycle_balance, get_version, return_cycle_balance_..., etc.).
-/// - The old deploy script called removed methods such as `upload_wasms`, producing:
-///   "Error: The replica returned a rejection error: ... Canister has no update method 'upload_wasms'."
-/// - All orchestration logic now lives in Rust (task_runner), is versioned with the
-///   code, type-checked where possible, and runnable via `cargo test -- --ignored`.
+/// - Keep the full deploy + init-arg wiring under Rust + cargo test --ignored.
+/// - After PO cleanup the PO surface is minimal; the UIS canister has its own
+///   UserInfoServiceInitArgs { version } that must be supplied on install/upgrade.
+/// - All orchestration is versioned with the code.
 ///
-/// What the test does (mirrors the essential parts of the old deploy-local flow
-/// but using only current PO methods + dfx for canister lifecycle):
-/// 1. Generate candid (good hygiene, keeps .did in sync).
-/// 2. Stop any running replica, start a clean local one in the background.
-/// 3. Wait for the replica to be healthy (short-poll, like the cluster AGENTS guideline).
-/// 4. `dfx deploy platform_orchestrator --network local`.
-/// 5. Add the actions_identity principal as a controller of the PO (so it can call
-///    the guarded harvest endpoints — the guard is "is_caller_platform_global_admin_or_controller").
-/// 6. Create a fresh "test target" canister (stand-in for a po_controlled_canister).
-/// 7. Add the local PO as a controller of that target (required for the internal
-///    `update_settings` that `add_our_identity_as_controller` performs on the target).
-/// 8. Build a local ic-agent using the actions_identity.pem (via the new
-///    `local_agent_from_pem` helper).
-/// 9. Call the three key methods from the harvester:
-///    - get_version (query)
-///    - get_controllers_and_cycle_balance(target)
-///    - add_our_identity_as_controller(target)
-/// 10. Assert they succeed (no "no update method", no Unauthorized, and the
-///     controller precondition on the target is satisfied so we get Ok(()) or
-///     a clean business error rather than a rejection).
+/// Current tests:
+/// - `setup_local_po_and_validate_harvest_methods` : full PO + harvester method smoke.
+/// - `setup_local_user_info_service` : candid-gen + dfx-build + deploy of user_info_service
+///   locally, followed by a get_version smoke call.
 ///
-/// Run:
+/// Run PO setup:
 ///   cargo test -p task_runner -- --ignored setup_local_po_and_validate_harvest_methods --nocapture
 ///
-/// After success you will see the local PO canister ID and a ✅ banner.
-/// The replica is left running so you can inspect with dfx / call other methods.
-/// Stop it with `dfx stop` when done.
+/// Run user_info_service local deploy/setup:
+///   cargo test -p task_runner -- --ignored setup_local_user_info_service --nocapture
 ///
-/// This test is the canonical way to obtain a local PO that the cycle harvester
-/// can talk to. It is also the required local validation step before any mainnet
-/// PO change (per the spirit of the "Testing Upgrades Locally" section in AGENTS.md).
+/// After success the replica is left running so you can `dfx canister call ... --network local`.
+/// When finished: `dfx stop`.
+///
+/// These local tests are the required validation step before any mainnet
+/// deployment/upgrade (see also "Testing Upgrades Locally" guidance in AGENTS.md).
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::Duration;
@@ -417,5 +403,137 @@ async fn setup_local_po_and_validate_harvest_methods() -> Result<()> {
     println!("   When finished: `dfx stop` to shut down the local replica.");
 
     // We intentionally leave the replica running for follow-up inspection / further manual calls.
+    Ok(())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// user_info_service local deploy + smoke test
+// Runs the *exact* flow the user wants before touching mainnet:
+//   1. candid generation (scripts/generate-candid.sh user_info_service)
+//   2. dfx build via the project (done by `dfx deploy` / explicit build)
+//   3. clean local replica
+//   4. deploy with the UserInfoServiceInitArgs record that the canister expects
+//   5. smoke call get_version
+// Run with:
+//   cargo test -p task_runner -- --ignored setup_local_user_info_service --nocapture
+// The replica is intentionally left running.
+#[tokio::test]
+#[ignore = "deploys user_info_service locally (candid-gen + dfx build + install) so you can validate before mainnet"]
+async fn setup_local_user_info_service() -> Result<()> {
+    let root: PathBuf = workspace_root();
+    let pem_path = root.join("actions_identity.pem");
+    anyhow::ensure!(
+        pem_path.exists(),
+        "actions_identity.pem not found at {} (required for some local flows that re-use the same identity)",
+        pem_path.display()
+    );
+
+    println!("==> [1/6] Generating candid for user_info_service ...");
+    let status = Command::new("bash")
+        .args(["scripts/generate-candid.sh", "user_info_service"])
+        .current_dir(&root)
+        .status()
+        .context("generate-candid.sh failed")?;
+    anyhow::ensure!(status.success(), "generate-candid.sh exited with failure");
+
+    println!("==> [2/6] Stopping any previous replica (best effort) ...");
+    let _ = Command::new("dfx")
+        .args(["stop"])
+        .current_dir(&root)
+        .status();
+
+    println!("==> [3/6] Starting a clean local replica (--background) ...");
+    let status = Command::new("dfx")
+        .args(["start", "--clean", "--background"])
+        .current_dir(&root)
+        .status()
+        .context("dfx start --clean --background failed")?;
+    anyhow::ensure!(status.success(), "dfx start returned non-zero");
+
+    println!("==> [4/6] Waiting for local replica to become healthy (short-poll) ...");
+    let mut healthy = false;
+    for attempt in 0..30 {
+        let output = Command::new("dfx")
+            .args(["ping", "local"])
+            .current_dir(&root)
+            .output();
+        if let Ok(out) = output {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            if out.status.success()
+                || stdout.contains("replica")
+                || stdout.contains("healthy")
+                || stdout.contains("Pinged")
+                || stderr.contains("replica")
+            {
+                healthy = true;
+                println!("  ✓ replica healthy after {} attempts", attempt + 1);
+                break;
+            }
+        }
+        if attempt % 5 == 0 && attempt > 0 {
+            println!("  ... still waiting (attempt {})", attempt + 1);
+        }
+        sleep(Duration::from_secs(2)).await;
+    }
+    anyhow::ensure!(
+        healthy,
+        "local replica did not become healthy — check `dfx ping local` manually"
+    );
+
+    println!("==> [5/6] Deploying user_info_service locally with init arg ...");
+    // Supply the versioned init arg that both init and post_upgrade expect.
+    // (The canister will store it in CanisterData and expose via get_version.)
+    let version = "local-test-1"; // easy to recognise in logs / get_version
+    let deploy_status = Command::new("dfx")
+        .args([
+            "deploy",
+            "user_info_service",
+            "--network",
+            "local",
+            "--argument",
+            &format!("(record {{version=\"{}\" }})", version),
+        ])
+        .current_dir(&root)
+        .status()
+        .context("dfx deploy user_info_service failed to spawn")?;
+    anyhow::ensure!(
+        deploy_status.success(),
+        "dfx deploy user_info_service returned non-zero"
+    );
+
+    // Show the canister id for convenience.
+    let id_out = Command::new("dfx")
+        .args(["canister", "id", "user_info_service", "--network", "local"])
+        .current_dir(&root)
+        .output()
+        .context("dfx canister id failed")?;
+    let id_str = String::from_utf8_lossy(&id_out.stdout).trim().to_string();
+    println!("  local user_info_service canister id: {}", id_str);
+
+    println!("==> [6/6] Smoke test: call get_version ...");
+    let call_status = Command::new("dfx")
+        .args([
+            "canister",
+            "call",
+            "user_info_service",
+            "get_version",
+            "--network",
+            "local",
+        ])
+        .current_dir(&root)
+        .status()
+        .context("dfx canister call get_version failed")?;
+    anyhow::ensure!(call_status.success(), "get_version smoke call failed");
+
+    println!(
+        "\n✅ SUCCESS: user_info_service deployed locally (version {}) and get_version works.",
+        version
+    );
+    println!("   You can now do further manual testing with:");
+    println!("     dfx canister call user_info_service ... --network local");
+    println!("   When finished: `dfx stop`.");
+
+    // Leave the replica up on purpose (same policy as the PO setup test).
     Ok(())
 }
