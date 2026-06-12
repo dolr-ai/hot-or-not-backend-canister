@@ -269,6 +269,50 @@ pub async fn pending_harvests(pool: &SqlitePool, limit: i64) -> Result<Vec<Princ
         .collect()
 }
 
+/// Return principals that have entries in cycle_harvest_failures but are not yet in cycle_harvested.
+/// Ordered by most recent failure first.
+///
+/// If `limit` <= 0, returns *all* such principals (no LIMIT clause at all).
+/// This is the recommended way to re-harvest every currently failed canister.
+pub async fn failed_harvest_principals(pool: &SqlitePool, limit: i64) -> Result<Vec<Principal>> {
+    if limit <= 0 {
+        // No limit → return everything (still ordered newest failure first)
+        let rows = sqlx::query!(
+            "SELECT DISTINCT f.principal
+             FROM cycle_harvest_failures f
+             WHERE NOT EXISTS (
+                 SELECT 1 FROM cycle_harvested d WHERE d.principal = f.principal
+             )
+             ORDER BY f.failed_at DESC"
+        )
+        .fetch_all(pool)
+        .await?;
+
+        return rows
+            .iter()
+            .map(|r| Principal::from_text(&r.principal).map_err(anyhow::Error::from))
+            .collect();
+    }
+
+    // Limited case
+    let rows = sqlx::query!(
+        "SELECT DISTINCT f.principal
+         FROM cycle_harvest_failures f
+         WHERE NOT EXISTS (
+             SELECT 1 FROM cycle_harvested d WHERE d.principal = f.principal
+         )
+         ORDER BY f.failed_at DESC
+         LIMIT ?",
+        limit
+    )
+    .fetch_all(pool)
+    .await?;
+
+    rows.iter()
+        .map(|r| Principal::from_text(&r.principal).map_err(anyhow::Error::from))
+        .collect()
+}
+
 /// Mark a canister as cycle-harvested. Called only after all steps succeed and validations pass.
 pub async fn mark_harvested(
     pool: &SqlitePool,
@@ -291,6 +335,17 @@ pub async fn mark_harvested(
     )
     .execute(pool)
     .await?;
+
+    // Clean up any prior failure records for this principal so that
+    // failure counts (as reported by harvest_counts / harvest_status)
+    // reflect current state rather than lifetime history.
+    sqlx::query!(
+        "DELETE FROM cycle_harvest_failures WHERE principal = ?",
+        text
+    )
+    .execute(pool)
+    .await?;
+
     Ok(())
 }
 

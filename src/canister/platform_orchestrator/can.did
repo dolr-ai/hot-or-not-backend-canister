@@ -1,8 +1,12 @@
 type CanisterRunningStatus = variant { Stopped; Stopping; Running };
 type ControlledCanisterDetails = record {
+  // Whether the canister is Running, Stopping, or Stopped. Stopped means it is
+  // frozen (ran out of cycles below the freezing threshold) and cannot process calls.
   status : CanisterRunningStatus;
   controllers : vec principal;
   cycle_balance : nat;
+  // Cycles held in the reserved balance for future storage payments.
+  // Released back to the main balance when memory is freed (e.g. after uninstall_code).
   reserved_cycles : nat;
 };
 type HttpRequest = record {
@@ -20,6 +24,9 @@ type Result = variant { Ok; Err : text };
 type Result_1 = variant { Ok : text; Err : text };
 type Result_2 = variant { Ok : ControlledCanisterDetails; Err : text };
 service : () -> {
+  // Adds our actions identity as a co-controller on the target canister.
+  // Sets controllers to [PO, ACTIONS_PRINCIPAL] — no canister_status fetch needed
+  // since we know these are PO-controlled canisters.
   add_our_identity_as_controller : (principal) -> (Result);
   deposit_cycles_to_canister : (principal, nat) -> (Result_1);
   get_controllers_and_cycle_balance : (principal) -> (Result_2);

@@ -38,15 +38,16 @@
 use anyhow::{Context, Result};
 use candid::{encode_args, Encode, Principal};
 use ic_agent::Identity;
-use std::sync::Arc;
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex as StdMutex};
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
 use crate::{
     agent::{agent_from_pem, workspace_root},
     db::{
-        harvest_counts, mark_harvest_failed, mark_harvested, open_pool, pending_harvest_count,
-        pending_harvests, total_controlled_count, DB_PATH,
+        failed_harvest_principals, harvest_counts, mark_harvest_failed, mark_harvested, open_pool,
+        pending_harvest_count, pending_harvests, total_controlled_count, DB_PATH,
     },
     sns_types::PLATFORM_ORCHESTRATOR_ID,
 };
@@ -55,8 +56,13 @@ use crate::{
 const MANAGEMENT_CANISTER: &str = "aaaaa-aa";
 
 /// Minimum balance (cycles) required after uninstall to proceed with reinstall + transfer.
-/// Covers wasm install cost + deposit_cycles call overhead (~260K base) + safety margin.
-const MIN_REINSTALL_BALANCE: u128 = 500_000_000;
+/// Must be high enough to cover:
+/// - wasm install cost (can be ~0.2 TC for template)
+/// - execution + deposit_cycles to PO inside return_cycle...
+/// - final uninstall + update_settings
+/// If below this after uninstall (i.e. for very low-balance PO-controlled canisters),
+/// we top up via PO's deposit_cycles_to_canister (recover most via the return call).
+const MIN_REINSTALL_BALANCE: u128 = 300_000_000_000; // 0.3 TC (raised after seeing 0.09 TC canisters fail install)
 
 /// Top-up amount when a canister's balance is too low to reinstall.
 /// We recover most of this back via return_cycle_balance, so still net positive.
@@ -504,7 +510,9 @@ async fn harvest_canister(
             format_cycles(MIN_REINSTALL_BALANCE)
         );
 
-        // Top up via PO's deposit_cycles_to_canister.
+        // Top up via PO's deposit_cycles_to_canister (PO itself funds it from its pool).
+        // This is recovered (mostly) when the freshly-installed template calls
+        // return_cycle_balance_to_platform_orchestrator.
         let deposit_arg = encode_args((canister_id, TOP_UP_AMOUNT))?;
         agent
             .update(&po, "deposit_cycles_to_canister")
@@ -810,9 +818,24 @@ struct BatchStats {
     transferred: u128,
 }
 
+#[allow(unused)]
 struct HarvestOutcome {
     succeeded: bool,
     transferred: u128,
+}
+
+/// RAII guard to release the claim when the task ends (even on panic).
+struct ClaimGuard {
+    claimed: Arc<StdMutex<HashSet<Principal>>>,
+    id: Principal,
+}
+
+impl Drop for ClaimGuard {
+    fn drop(&mut self) {
+        if let Ok(mut set) = self.claimed.lock() {
+            set.remove(&self.id);
+        }
+    }
 }
 
 // ── Helper types for PO API responses ─────────────────────────────────────────
@@ -999,107 +1022,113 @@ async fn harvest_cycles_batch() -> Result<()> {
 
     let semaphore = Arc::new(Semaphore::new(4));
     let stats = Arc::new(tokio::sync::Mutex::new(BatchStats::default()));
+    let claimed = Arc::new(StdMutex::new(HashSet::<Principal>::new()));
     let mut join_set: JoinSet<HarvestOutcome> = JoinSet::new();
 
     loop {
-        // Try to spawn as many new tasks as there are available semaphore permits.
+        // Claim unclaimed candidates for this round.
         let available = semaphore.available_permits();
+        let mut to_spawn = vec![];
         if available > 0 {
             let fetch_n = available as i64;
-            let pending = pending_harvests(pool.as_ref(), fetch_n).await?;
-            if !pending.is_empty() {
-                for canister_id in pending {
-                    let sem = semaphore.clone();
-                    let ag = agent.clone();
-                    let wsm = wasm_blob.clone();
-                    let pl = pool.clone();
-                    let act = actions_principal.clone();
-                    let p = po.clone();
-                    let st = stats.clone();
-
-                    join_set.spawn(async move {
-                        let _permit = sem.acquire().await.expect("semaphore permit");
-
-                        match harvest_canister(&ag, act, p, canister_id, &wsm).await {
-                            Ok((
-                                pre_balance,
-                                pre_reserved,
-                                post_uninstall,
-                                transferred,
-                                topped_up,
-                            )) => {
-                                if let Err(e) = mark_harvested(
-                                    pl.as_ref(),
-                                    &canister_id,
-                                    pre_balance,
-                                    pre_reserved,
-                                    post_uninstall,
-                                    transferred,
-                                    topped_up,
-                                )
-                                .await
-                                {
-                                    println!(
-                                        "  warning: mark_harvested failed for {}: {}",
-                                        canister_id, e
-                                    );
-                                }
-
-                                {
-                                    let mut g = st.lock().await;
-                                    g.success += 1;
-                                    g.transferred += transferred;
-                                }
-
-                                println!(
-                                    "  \u{2713} [{}] harvested, transferred {} TC{}",
-                                    canister_id,
-                                    format_cycles(transferred),
-                                    if topped_up > 0 { " (topped up)" } else { "" }
-                                );
-
-                                HarvestOutcome {
-                                    succeeded: true,
-                                    transferred,
-                                }
-                            }
-                            Err(e) => {
-                                let reason = e.to_string();
-                                let _ =
-                                    mark_harvest_failed(pl.as_ref(), &canister_id, &reason).await;
-
-                                {
-                                    let mut g = st.lock().await;
-                                    g.failed += 1;
-                                }
-
-                                println!("  \u{2717} [{}] failed: {}", canister_id, reason);
-
-                                HarvestOutcome {
-                                    succeeded: false,
-                                    transferred: 0,
-                                }
-                            }
-                        }
-                    });
+            let candidates = pending_harvests(pool.as_ref(), fetch_n)
+                .await
+                .unwrap_or_default();
+            {
+                let mut c = claimed.lock().unwrap();
+                for cid in candidates {
+                    if !c.contains(&cid) {
+                        c.insert(cid);
+                        to_spawn.push(cid);
+                    }
                 }
             }
         }
 
-        // If no tasks are running and there are no pending canisters, we are done.
-        let pending_check = pending_harvests(pool.as_ref(), 1).await?;
-        if join_set.is_empty() && pending_check.is_empty() {
-            break;
+        for canister_id in to_spawn {
+            let sem = semaphore.clone();
+            let ag = agent.clone();
+            let wsm = wasm_blob.clone();
+            let pl = pool.clone();
+            let act = actions_principal.clone();
+            let p = po.clone();
+            let st = stats.clone();
+            let cl = claimed.clone();
+
+            join_set.spawn(async move {
+                let _guard = ClaimGuard {
+                    claimed: cl,
+                    id: canister_id,
+                };
+                let _permit = sem.acquire().await.expect("semaphore permit");
+
+                match harvest_canister(&ag, act, p, canister_id, &wsm).await {
+                    Ok((pre_balance, pre_reserved, post_uninstall, transferred, topped_up)) => {
+                        if let Err(e) = mark_harvested(
+                            pl.as_ref(),
+                            &canister_id,
+                            pre_balance,
+                            pre_reserved,
+                            post_uninstall,
+                            transferred,
+                            topped_up,
+                        )
+                        .await
+                        {
+                            println!(
+                                "  warning: mark_harvested failed for {}: {}",
+                                canister_id, e
+                            );
+                        }
+
+                        {
+                            let mut g = st.lock().await;
+                            g.success += 1;
+                            g.transferred += transferred;
+                        }
+
+                        println!(
+                            "  \u{2713} [{}] harvested, transferred {} TC{}",
+                            canister_id,
+                            format_cycles(transferred),
+                            if topped_up > 0 { " (topped up)" } else { "" }
+                        );
+
+                        HarvestOutcome {
+                            succeeded: true,
+                            transferred,
+                        }
+                    }
+                    Err(e) => {
+                        let reason = e.to_string();
+                        let _ = mark_harvest_failed(pl.as_ref(), &canister_id, &reason).await;
+
+                        {
+                            let mut g = st.lock().await;
+                            g.failed += 1;
+                        }
+
+                        println!("  \u{2717} [{}] failed: {}", canister_id, reason);
+
+                        HarvestOutcome {
+                            succeeded: false,
+                            transferred: 0,
+                        }
+                    }
+                }
+            });
         }
 
-        // Wait for at least one task to complete (this keeps the concurrency going).
-        // When one finishes, the loop will fetch/spawn new ones on next iteration.
+        if join_set.is_empty() {
+            let pending_check = pending_harvests(pool.as_ref(), 1).await.unwrap_or_default();
+            if pending_check.is_empty() {
+                break;
+            }
+        }
+
         if let Some(result) = join_set.join_next().await {
-            match result {
-                Ok(_outcome) => { /* stats and marking already updated inside the spawned task */ }
-                Err(e) => {
-                    println!("  \u{2717} harvest task panicked: {}", e);
-                }
+            if let Err(e) = result {
+                println!("  \u{2717} harvest task panicked: {}", e);
             }
         }
     }
@@ -1121,6 +1150,212 @@ async fn harvest_cycles_batch() -> Result<()> {
     // Snapshot PO balance after the batch to see if the harvest deposits
     // actually increased its cycle balance.
     print_po_cycle_balance("after batch harvest", &root);
+
+    Ok(())
+}
+
+/// Re-process only the canisters that previously failed (in `cycle_harvest_failures`)
+/// but have not yet succeeded (not in `cycle_harvested`).
+///
+/// By default (or when `HARVEST_FAILED_LIMIT` <= 0) it processes *all* currently
+/// failed canisters with no artificial limit. This is the mode you usually want
+/// when you say "do all the failed ones".
+///
+/// Pass a positive number to cap the run (handy for testing a small subset first).
+///
+/// Usage (process every single failed canister – the recommended way):
+///   cargo test -p task_runner -- --ignored harvest_failed_canisters --nocapture
+///
+/// Usage (only the first 10 for a trial run):
+///   HARVEST_FAILED_LIMIT=10 \
+///     cargo test -p task_runner -- --ignored harvest_failed_canisters --nocapture
+#[tokio::test]
+#[ignore = "harvests only previously-failed canisters on mainnet — run explicitly"]
+async fn harvest_failed_canisters() -> Result<()> {
+    let root = workspace_root();
+    let pem_path = root.join("actions_identity.pem");
+    let db_path = root.join(DB_PATH);
+
+    let pool = open_pool(db_path.to_str().unwrap()).await?;
+
+    let raw_limit: i64 = std::env::var("HARVEST_FAILED_LIMIT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+
+    // Pass 0 or negative through unchanged → `failed_harvest_principals` will treat it as "no limit".
+    let limit = if raw_limit <= 0 { 0i64 } else { raw_limit };
+
+    let failed = failed_harvest_principals(&pool, limit).await?;
+    if failed.is_empty() {
+        println!("No previously-failed canisters to re-harvest.");
+        return Ok(());
+    }
+
+    println!(
+        "Re-harvesting {} previously failed canisters...",
+        failed.len()
+    );
+
+    // Build wasm + candid (same as other harvest entry points).
+    println!("\nBuilding individual_user_template + regenerating Candid via generate-candid.sh...");
+    let build_status = std::process::Command::new("bash")
+        .env("DFX_WARNING", "-mainnet_plaintext_identity")
+        .args(["scripts/generate-candid.sh", "individual_user_template"])
+        .current_dir(&root)
+        .status()
+        .context("bash or scripts/generate-candid.sh not found")?;
+    anyhow::ensure!(
+        build_status.success(),
+        "scripts/generate-candid.sh individual_user_template failed"
+    );
+
+    let wasm_path = root.join(INDIVIDUAL_USER_WASM_PATH);
+    let wasm_blob = std::fs::read(&wasm_path)
+        .with_context(|| format!("wasm not found at {}", wasm_path.display()))?;
+    println!("  wasm size: {} bytes", wasm_blob.len());
+
+    let agent = Arc::new(agent_from_pem(&pem_path).await?);
+    let po = Principal::from_text(PLATFORM_ORCHESTRATOR_ID)?;
+
+    let actions_identity = ic_agent::identity::Secp256k1Identity::from_pem_file(&pem_path)
+        .with_context(|| {
+            format!(
+                "failed to load Secp256k1Identity from {}",
+                pem_path.display()
+            )
+        })?;
+    let actions_principal = actions_identity.sender().map_err(|e| {
+        anyhow::anyhow!(
+            "could not derive sender principal from actions_identity.pem: {}",
+            e
+        )
+    })?;
+
+    let wasm_blob = Arc::new(wasm_blob);
+    let pool = Arc::new(pool);
+
+    print_po_cycle_balance("before failed re-harvest", &root);
+
+    let semaphore = Arc::new(Semaphore::new(4));
+    let stats = Arc::new(tokio::sync::Mutex::new(BatchStats::default()));
+    let claimed = Arc::new(StdMutex::new(HashSet::<Principal>::new()));
+    let mut join_set: JoinSet<HarvestOutcome> = JoinSet::new();
+
+    for canister_id in failed {
+        let available = semaphore.available_permits();
+        if available == 0 {
+            if let Some(res) = join_set.join_next().await {
+                if let Err(e) = res {
+                    println!("  \u{2717} task panicked: {}", e);
+                }
+            }
+        }
+
+        {
+            let mut c = claimed.lock().unwrap();
+            if c.contains(&canister_id) {
+                continue;
+            }
+            c.insert(canister_id);
+        }
+
+        let sem = semaphore.clone();
+        let ag = agent.clone();
+        let wsm = wasm_blob.clone();
+        let pl = pool.clone();
+        let act = actions_principal.clone();
+        let p = po.clone();
+        let st = stats.clone();
+        let cl = claimed.clone();
+
+        join_set.spawn(async move {
+            let _guard = ClaimGuard {
+                claimed: cl,
+                id: canister_id,
+            };
+            let _permit = sem.acquire().await.expect("semaphore permit");
+
+            match harvest_canister(&ag, act, p, canister_id, &wsm).await {
+                Ok((pre_balance, pre_reserved, post_uninstall, transferred, topped_up)) => {
+                    if let Err(e) = mark_harvested(
+                        pl.as_ref(),
+                        &canister_id,
+                        pre_balance,
+                        pre_reserved,
+                        post_uninstall,
+                        transferred,
+                        topped_up,
+                    )
+                    .await
+                    {
+                        println!(
+                            "  warning: mark_harvested failed for {}: {}",
+                            canister_id, e
+                        );
+                    }
+
+                    {
+                        let mut g = st.lock().await;
+                        g.success += 1;
+                        g.transferred += transferred;
+                    }
+
+                    println!(
+                        "  \u{2713} [{}] re-harvested, transferred {} TC{}",
+                        canister_id,
+                        format_cycles(transferred),
+                        if topped_up > 0 { " (topped up)" } else { "" }
+                    );
+
+                    HarvestOutcome {
+                        succeeded: true,
+                        transferred,
+                    }
+                }
+                Err(e) => {
+                    let reason = e.to_string();
+                    let _ = mark_harvest_failed(pl.as_ref(), &canister_id, &reason).await;
+
+                    {
+                        let mut g = st.lock().await;
+                        g.failed += 1;
+                    }
+
+                    println!("  \u{2717} [{}] re-harvest failed: {}", canister_id, reason);
+
+                    HarvestOutcome {
+                        succeeded: false,
+                        transferred: 0,
+                    }
+                }
+            }
+        });
+    }
+
+    // Drain remaining tasks
+    while !join_set.is_empty() {
+        if let Some(res) = join_set.join_next().await {
+            if let Err(e) = res {
+                println!("  \u{2717} task panicked: {}", e);
+            }
+        }
+    }
+
+    let final_stats = stats.lock().await;
+
+    let (final_done, final_failed) = harvest_counts(&pool).await?;
+    println!("\n========== Failed Re-harvest Summary ==========");
+    println!("  Successfully recovered: {}", final_stats.success);
+    println!("  Still failing: {}", final_stats.failed);
+    println!(
+        "  Total transferred in this run: {} TC",
+        format_cycles(final_stats.transferred)
+    );
+    println!("  Total harvested (all time): {}", final_done);
+    println!("  Total failures recorded (all time): {}", final_failed);
+
+    print_po_cycle_balance("after failed re-harvest", &root);
 
     Ok(())
 }
