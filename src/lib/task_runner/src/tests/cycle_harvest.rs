@@ -971,7 +971,7 @@ async fn harvest_cycles_batch() -> Result<()> {
     }
 
     println!(
-        "Processing all pending canisters ({} already done) with up to 4 in flight...",
+        "Processing all pending canisters ({} already done) with up to 128 in flight...",
         done
     );
 
@@ -1021,7 +1021,7 @@ async fn harvest_cycles_batch() -> Result<()> {
     // Snapshot PO balance before any harvest transfers this batch.
     print_po_cycle_balance("before batch harvest", &root);
 
-    let semaphore = Arc::new(Semaphore::new(4));
+    let semaphore = Arc::new(Semaphore::new(128));
     let stats = Arc::new(tokio::sync::Mutex::new(BatchStats::default()));
     let claimed = Arc::new(StdMutex::new(HashSet::<Principal>::new()));
     let mut join_set: JoinSet<HarvestOutcome> = JoinSet::new();
