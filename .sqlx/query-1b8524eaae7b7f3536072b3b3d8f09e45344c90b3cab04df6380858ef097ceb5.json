@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT COUNT(*) FROM controllers",
+  "query": "SELECT COUNT(*)\n         FROM po_controlled_canisters p\n         WHERE NOT EXISTS (\n             SELECT 1 FROM cycle_harvested d WHERE d.principal = p.principal\n         )",
   "describe": {
     "columns": [
       {
@@ -17,5 +17,5 @@
       false
     ]
   },
-  "hash": "531071557fbcde789ee86ede4b0835d1e102b11e19c39c89436195fba4f55971"
+  "hash": "1b8524eaae7b7f3536072b3b3d8f09e45344c90b3cab04df6380858ef097ceb5"
 }

@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT COUNT(*) FROM canisters",
+  "query": "SELECT COUNT(*) FROM po_controlled_canisters",
   "describe": {
     "columns": [
       {
@@ -17,5 +17,5 @@
       false
     ]
   },
-  "hash": "32b35957d7d58e46df41daa825823320e4d64f908d9016a4a43c0983cc3ce1fb"
+  "hash": "e932698b01e7247aa0e22836e9f2db6357d046abd6c9f7e4aa9da24af2bd181b"
 }

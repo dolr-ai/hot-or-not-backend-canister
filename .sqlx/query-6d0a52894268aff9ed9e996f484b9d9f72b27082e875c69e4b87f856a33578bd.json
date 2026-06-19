@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT DISTINCT f.principal\n             FROM cycle_harvest_failures f\n             WHERE NOT EXISTS (\n                 SELECT 1 FROM cycle_harvested d WHERE d.principal = f.principal\n             )\n             ORDER BY f.failed_at DESC",
+  "describe": {
+    "columns": [
+      {
+        "name": "principal",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "cycle_harvest_failures",
+            "name": "principal"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "6d0a52894268aff9ed9e996f484b9d9f72b27082e875c69e4b87f856a33578bd"
+}

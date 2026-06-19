@@ -753,8 +753,9 @@ async fn harvest_canister(
 
     // Validate controllers are [PO] only.
     if details.controllers.len() != 1 || details.controllers[0] != po {
-        println!(
-            "  ⚠ WARNING: controllers not set to [PO] only: {:?}",
+        anyhow::bail!(
+            "controllers not set to [PO] only after update_settings: {:?}. \
+             The canister was NOT fully harvested — do not record as success.",
             details.controllers
         );
     } else {
@@ -1021,7 +1022,7 @@ async fn harvest_cycles_batch() -> Result<()> {
     // Snapshot PO balance before any harvest transfers this batch.
     print_po_cycle_balance("before batch harvest", &root);
 
-    let semaphore = Arc::new(Semaphore::new(128));
+    let semaphore = Arc::new(Semaphore::new(32));
     let stats = Arc::new(tokio::sync::Mutex::new(BatchStats::default()));
     let claimed = Arc::new(StdMutex::new(HashSet::<Principal>::new()));
     let mut join_set: JoinSet<HarvestOutcome> = JoinSet::new();
