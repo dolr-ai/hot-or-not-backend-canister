@@ -893,16 +893,29 @@ async fn harvest_single_canister() -> Result<()> {
     // (so the .did is always produced from the exact compiled export_candid!() in this build).
     // We invoke the project's generate-candid.sh instead of raw `dfx build` so the
     // checked-in can.did for individual_user_template stays in sync automatically.
+    // Then run `dfx build` to produce the fresh .wasm.gz in .dfx/ic/canisters/.
     println!("Building individual_user_template + regenerating Candid via generate-candid.sh...");
-    let status = std::process::Command::new("bash")
+    let build_status = std::process::Command::new("bash")
         .env("DFX_WARNING", "-mainnet_plaintext_identity")
         .args(["scripts/generate-candid.sh", "individual_user_template"])
         .current_dir(&root)
         .status()
         .context("bash or scripts/generate-candid.sh not found")?;
     anyhow::ensure!(
-        status.success(),
+        build_status.success(),
         "scripts/generate-candid.sh individual_user_template failed"
+    );
+
+    // dfx build to produce the fresh .wasm.gz in .dfx/ic/canisters/
+    let dfx_status = std::process::Command::new("dfx")
+        .env("DFX_WARNING", "-mainnet_plaintext_identity")
+        .args(["build", "--network=ic", "individual_user_template"])
+        .current_dir(&root)
+        .status()
+        .context("dfx build individual_user_template not found")?;
+    anyhow::ensure!(
+        dfx_status.success(),
+        "dfx build individual_user_template failed"
     );
 
     let wasm_path = root.join(INDIVIDUAL_USER_WASM_PATH);
@@ -931,22 +944,29 @@ async fn harvest_single_canister() -> Result<()> {
         )
     })?;
 
-    let (pre_balance, pre_reserved, post_uninstall, transferred, topped_up) =
-        harvest_canister(&agent, actions_principal, po, canister_id, &wasm_blob).await?;
+    match harvest_canister(&agent, actions_principal, po, canister_id, &wasm_blob).await {
+        Ok((pre_balance, pre_reserved, post_uninstall, transferred, topped_up)) => {
+            // Mark as harvested in DB — only after all steps succeed and validations pass.
+            mark_harvested(
+                &pool,
+                &canister_id,
+                pre_balance,
+                pre_reserved,
+                post_uninstall,
+                transferred,
+                topped_up,
+            )
+            .await?;
 
-    // Mark as harvested in DB — only after all steps succeed and validations pass.
-    mark_harvested(
-        &pool,
-        &canister_id,
-        pre_balance,
-        pre_reserved,
-        post_uninstall,
-        transferred,
-        topped_up,
-    )
-    .await?;
+            println!("\n✓ Harvest complete for {}", canister_id);
+        }
+        Err(e) => {
+            let reason = e.to_string();
+            let _ = mark_harvest_failed(&pool, &canister_id, &reason).await;
+            println!("\n✗ Harvest failed for {}: {}", canister_id, reason);
+        }
+    }
 
-    println!("\n✓ Harvest complete for {}", canister_id);
     Ok(())
 }
 
@@ -988,6 +1008,18 @@ async fn harvest_cycles_batch() -> Result<()> {
     anyhow::ensure!(
         status.success(),
         "scripts/generate-candid.sh individual_user_template failed"
+    );
+
+    // dfx build to produce the fresh .wasm.gz in .dfx/ic/canisters/
+    let dfx_status = std::process::Command::new("dfx")
+        .env("DFX_WARNING", "-mainnet_plaintext_identity")
+        .args(["build", "--network=ic", "individual_user_template"])
+        .current_dir(&root)
+        .status()
+        .context("dfx build not found")?;
+    anyhow::ensure!(
+        dfx_status.success(),
+        "dfx build individual_user_template failed"
     );
 
     let wasm_path = root.join(INDIVIDUAL_USER_WASM_PATH);
@@ -1199,7 +1231,7 @@ async fn harvest_failed_canisters() -> Result<()> {
         failed.len()
     );
 
-    // Build wasm + candid (same as other harvest entry points).
+    // Build wasm + candid (same as other harvest entry points — with dfx build)
     println!("\nBuilding individual_user_template + regenerating Candid via generate-candid.sh...");
     let build_status = std::process::Command::new("bash")
         .env("DFX_WARNING", "-mainnet_plaintext_identity")
@@ -1360,6 +1392,421 @@ async fn harvest_failed_canisters() -> Result<()> {
     print_po_cycle_balance("after failed re-harvest", &root);
 
     Ok(())
+}
+
+/// Harvest failed canisters that don't have PO as a controller by using the parent canister
+/// to add controllers, then harvesting both parent and child.
+///
+/// Flow:
+/// 1. Query failed canisters (not yet harvested)
+/// 2. For each, check if PO is a controller
+/// 3. If PO is NOT a controller:
+///    a. Extract the parent controller
+///    b. Check if parent is already harvested
+///    c. If yes, install wasm on parent
+///    d. Call add_controllers(child_id) on parent
+///    e. Install wasm on child
+///    f. Harvest child (normal flow)
+///    g. Re-harvest parent (wasm reinstall means it has reserved cycles again)
+///
+/// Usage:
+///   cargo test -p task_runner -- --ignored harvest_failed_with_parent_recovery --nocapture
+///
+/// Usage (only first N for testing):
+///   HARVEST_FAILED_LIMIT=10 \
+///     cargo test -p task_runner -- --ignored harvest_failed_with_parent_recovery --nocapture
+#[tokio::test]
+#[ignore = "harvests failed canisters with parent recovery on mainnet — run explicitly"]
+async fn harvest_failed_with_parent_recovery() -> Result<()> {
+    let root = workspace_root();
+    let pem_path = root.join("actions_identity.pem");
+    let db_path = root.join(DB_PATH);
+
+    let pool = open_pool(db_path.to_str().unwrap()).await?;
+
+    let raw_limit: i64 = std::env::var("HARVEST_FAILED_LIMIT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+
+    let limit = if raw_limit <= 0 { 0i64 } else { raw_limit };
+
+    let failed = failed_harvest_principals(&pool, limit).await?;
+    if failed.is_empty() {
+        println!("No previously-failed canisters to re-harvest.");
+        return Ok(());
+    }
+
+    println!(
+        "Processing {} previously failed canisters with parent recovery...",
+        failed.len()
+    );
+
+    // Build wasm + candid
+    println!("\nBuilding individual_user_template + regenerating Candid via generate-candid.sh...");
+    let build_status = std::process::Command::new("bash")
+        .env("DFX_WARNING", "-mainnet_plaintext_identity")
+        .args(["scripts/generate-candid.sh", "individual_user_template"])
+        .current_dir(&root)
+        .status()
+        .context("bash or scripts/generate-candid.sh not found")?;
+    anyhow::ensure!(
+        build_status.success(),
+        "scripts/generate-candid.sh individual_user_template failed"
+    );
+
+    let wasm_path = root.join(INDIVIDUAL_USER_WASM_PATH);
+    let wasm_blob = std::fs::read(&wasm_path)
+        .with_context(|| format!("wasm not found at {}", wasm_path.display()))?;
+    println!("  wasm size: {} bytes", wasm_blob.len());
+
+    let agent = Arc::new(agent_from_pem(&pem_path).await?);
+    let po = Principal::from_text(PLATFORM_ORCHESTRATOR_ID)?;
+
+    let actions_identity = ic_agent::identity::Secp256k1Identity::from_pem_file(&pem_path)
+        .with_context(|| {
+            format!(
+                "failed to load Secp256k1Identity from {}",
+                pem_path.display()
+            )
+        })?;
+    let actions_principal = actions_identity.sender().map_err(|e| {
+        anyhow::anyhow!(
+            "could not derive sender principal from actions_identity.pem: {}",
+            e
+        )
+    })?;
+
+    let wasm_blob = Arc::new(wasm_blob);
+    let pool = Arc::new(pool);
+
+    print_po_cycle_balance("before parent recovery harvest", &root);
+
+    let stats = Arc::new(tokio::sync::Mutex::new(BatchStats::default()));
+
+    // Process each failed canister serially (parent recovery requires sequential steps)
+    for canister_id in failed {
+        println!("\n  ── Processing {} ──", canister_id);
+
+        // Check if PO is already a controller
+        let po_is_controller = check_if_po_is_controller(&agent, canister_id, &root).await?;
+
+        if po_is_controller {
+            // PO is already a controller, run normal harvest
+            match harvest_canister(&agent, actions_principal, po, canister_id, &wasm_blob).await {
+                Ok((pre_balance, pre_reserved, post_uninstall, transferred, topped_up)) => {
+                    if let Err(e) = mark_harvested(
+                        pool.as_ref(),
+                        &canister_id,
+                        pre_balance,
+                        pre_reserved,
+                        post_uninstall,
+                        transferred,
+                        topped_up,
+                    )
+                    .await
+                    {
+                        println!(
+                            "  warning: mark_harvested failed for {}: {}",
+                            canister_id, e
+                        );
+                    }
+
+                    {
+                        let mut g = stats.lock().await;
+                        g.success += 1;
+                        g.transferred += transferred;
+                    }
+
+                    println!(
+                        "  \u{2713} [{}] harvested (PO was controller), transferred {} TC{}",
+                        canister_id,
+                        format_cycles(transferred),
+                        if topped_up > 0 { " (topped up)" } else { "" }
+                    );
+                }
+                Err(e) => {
+                    let reason = e.to_string();
+                    let _ = mark_harvest_failed(pool.as_ref(), &canister_id, &reason).await;
+
+                    {
+                        let mut g = stats.lock().await;
+                        g.failed += 1;
+                    }
+
+                    println!("  \u{2717} [{}] harvest failed: {}", canister_id, reason);
+                }
+            }
+        } else {
+            // PO is NOT a controller, need parent recovery
+            match harvest_with_parent_recovery(
+                &agent,
+                actions_principal,
+                po,
+                canister_id,
+                &wasm_blob,
+                pool.as_ref(),
+                &root,
+            )
+            .await
+            {
+                Ok(transferred) => {
+                    {
+                        let mut g = stats.lock().await;
+                        g.success += 1;
+                        g.transferred += transferred;
+                    }
+
+                    println!(
+                        "  \u{2713} [{}] harvested with parent recovery, transferred {} TC",
+                        canister_id,
+                        format_cycles(transferred)
+                    );
+                }
+                Err(e) => {
+                    let reason = e.to_string();
+                    let _ = mark_harvest_failed(pool.as_ref(), &canister_id, &reason).await;
+
+                    {
+                        let mut g = stats.lock().await;
+                        g.failed += 1;
+                    }
+
+                    println!(
+                        "  \u{2717} [{}] parent recovery failed: {}",
+                        canister_id, reason
+                    );
+                }
+            }
+        }
+    }
+
+    let final_stats = stats.lock().await;
+
+    let (final_done, final_failed) = harvest_counts(&pool).await?;
+    println!("\n========== Parent Recovery Harvest Summary ==========");
+    println!("  Successfully recovered: {}", final_stats.success);
+    println!("  Still failing: {}", final_stats.failed);
+    println!(
+        "  Total transferred in this run: {} TC",
+        format_cycles(final_stats.transferred)
+    );
+    println!("  Total harvested (all time): {}", final_done);
+    println!("  Total failures recorded (all time): {}", final_failed);
+
+    print_po_cycle_balance("after parent recovery harvest", &root);
+
+    Ok(())
+}
+
+/// Check if PO is a controller of the given canister by running `dfx canister info`.
+/// We use dfx because it reads controllers directly from the IC state tree (CLI-only),
+/// which works for any canister regardless of whether we are a controller.
+///
+/// `canister_status`/`canister_info` on the management canister require controller access,
+/// so they cannot be used here for canisters we don't control.
+async fn check_if_po_is_controller(
+    _agent: &ic_agent::Agent,
+    canister_id: Principal,
+    root: &std::path::Path,
+) -> Result<bool> {
+    let po = Principal::from_text(PLATFORM_ORCHESTRATOR_ID)?;
+    let controllers = get_canister_controllers(canister_id, root)?;
+    Ok(controllers.contains(&po))
+}
+
+/// Get controllers of a canister by running `dfx canister info`.
+fn get_canister_controllers(
+    canister_id: Principal,
+    root: &std::path::Path,
+) -> Result<Vec<Principal>> {
+    let output = std::process::Command::new("dfx")
+        .env("DFX_WARNING", "-mainnet_plaintext_identity")
+        .args(["canister", "info", &canister_id.to_text(), "--network=ic"])
+        .current_dir(root)
+        .output()
+        .context("failed to execute `dfx canister info`")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(anyhow::anyhow!(
+            "`dfx canister info` failed: {}",
+            stderr.trim()
+        ));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let controllers_line = stdout
+        .lines()
+        .find(|line| line.starts_with("Controllers:"))
+        .context("`dfx canister info` output missing 'Controllers:' line")?;
+
+    let controller_principals: Vec<Principal> = controllers_line
+        .strip_prefix("Controllers:")
+        .unwrap()
+        .split_whitespace()
+        .filter_map(|s| Principal::from_text(s).ok())
+        .collect();
+
+    Ok(controller_principals)
+}
+
+/// Harvest a canister where PO is not a controller, using parent recovery.
+async fn harvest_with_parent_recovery(
+    agent: &ic_agent::Agent,
+    actions_principal: Principal,
+    po: Principal,
+    child_id: Principal,
+    wasm_blob: &[u8],
+    pool: &sqlx::SqlitePool,
+    root: &std::path::Path,
+) -> Result<u128> {
+    let management_canister = Principal::from_text(MANAGEMENT_CANISTER)?;
+
+    // Get the parent controller from the child canister via dfx
+    let controllers = get_canister_controllers(child_id, root)?;
+
+    if controllers.is_empty() {
+        anyhow::bail!("child canister {} has no controllers", child_id);
+    }
+
+    let parent_id = controllers[0];
+    println!("  Child {} controlled by parent {}", child_id, parent_id);
+
+    // Check if parent is already harvested
+    let parent_harvested = sqlx::query_scalar!(
+        "SELECT 1 FROM cycle_harvested WHERE principal = ?",
+        parent_id.to_text()
+    )
+    .fetch_optional(pool)
+    .await?
+    .is_some();
+
+    if !parent_harvested {
+        anyhow::bail!(
+            "parent {} is not in cycle_harvested, cannot use for recovery",
+            parent_id
+        );
+    }
+
+    println!(
+        "  Parent {} is harvested, proceeding with recovery",
+        parent_id
+    );
+
+    // Add actions_identity as controller of parent via PO (parent is PO-only after harvest)
+    println!(
+        "  Adding actions_identity as controller of parent {}...",
+        parent_id
+    );
+    let add_ctrl_arg = encode_args((parent_id,))?;
+    agent
+        .update(&po, "add_our_identity_as_controller")
+        .with_arg(add_ctrl_arg)
+        .call_and_wait()
+        .await
+        .map_err(|e| anyhow::anyhow!("add_our_identity_as_controller on parent failed: {}", e))?;
+    println!("  ✓ actions_identity added as controller of parent");
+
+    // Top up parent with cycles so it can afford wasm install
+    // (harvested canisters are often near-zero balance)
+    let deposit_arg = encode_args((parent_id, TOP_UP_AMOUNT))?;
+    agent
+        .update(&po, "deposit_cycles_to_canister")
+        .with_arg(deposit_arg)
+        .call_and_wait()
+        .await
+        .map_err(|e| anyhow::anyhow!("deposit_cycles_to_canister on parent failed: {}", e))?;
+    println!("  ✓ topped up parent with 0.5T");
+
+    // Install wasm on parent (now we have access as co-controller)
+    println!("  Installing wasm on parent {}...", parent_id);
+    let install_arg = encode_args((InstallCodeArgs {
+        mode: CanisterInstallMode::Reinstall,
+        canister_id: parent_id,
+        wasm_module: wasm_blob.to_vec(),
+        arg: vec![],
+        sender_canister_version: None,
+    },))?;
+
+    agent
+        .update(&management_canister, "install_code")
+        .with_arg(install_arg)
+        .with_effective_canister_id(parent_id)
+        .call_and_wait()
+        .await
+        .map_err(|e| anyhow::anyhow!("install_code on parent failed: {}", e))?;
+
+    println!("  \u{2713} wasm installed on parent");
+
+    // Call add_controllers(child_id) on parent
+    println!("  Calling add_controllers({}) on parent...", child_id);
+    let add_ctrl_arg = encode_args((child_id,))?;
+    let add_ctrl_response = agent
+        .update(&parent_id, "add_controllers")
+        .with_arg(add_ctrl_arg)
+        .call_and_wait()
+        .await
+        .map_err(|e| anyhow::anyhow!("add_controllers call failed: {}", e))?;
+
+    let _: Result<(), String> = candid::decode_one(&add_ctrl_response)
+        .map_err(|e| anyhow::anyhow!("failed to decode add_controllers response: {}", e))?;
+
+    println!(
+        "  \u{2713} add_controllers succeeded, PO + actions principal now controllers of child"
+    );
+
+    // Harvest child using the normal, tested flow
+    println!("  Harvesting child {}...", child_id);
+    let (
+        child_pre_balance,
+        child_pre_reserved,
+        child_post_uninstall,
+        child_transferred,
+        child_topped_up,
+    ) = harvest_canister(agent, actions_principal, po, child_id, wasm_blob).await?;
+
+    mark_harvested(
+        pool,
+        &child_id,
+        child_pre_balance,
+        child_pre_reserved,
+        child_post_uninstall,
+        child_transferred,
+        child_topped_up,
+    )
+    .await?;
+    println!(
+        "  ✓ child harvested, transferred {} TC",
+        format_cycles(child_transferred)
+    );
+
+    // Re-harvest parent using the normal flow (wasm reinstall means it has reserved cycles again)
+    println!("  Re-harvesting parent {}...", parent_id);
+    let (
+        parent_pre_balance,
+        parent_pre_reserved,
+        parent_post_uninstall,
+        parent_transferred,
+        parent_topped_up,
+    ) = harvest_canister(agent, actions_principal, po, parent_id, wasm_blob).await?;
+
+    mark_harvested(
+        pool,
+        &parent_id,
+        parent_pre_balance,
+        parent_pre_reserved,
+        parent_post_uninstall,
+        parent_transferred,
+        parent_topped_up,
+    )
+    .await?;
+    println!(
+        "  ✓ parent re-harvested, transferred {} TC",
+        format_cycles(parent_transferred)
+    );
+
+    Ok(child_transferred + parent_transferred)
 }
 
 /// Print a safe, read-only snapshot of the current harvest progress against the
