@@ -1,5 +1,16 @@
-type Result = variant { Ok : nat; Err : text };
+type Result = variant { Ok; Err : text };
+type Result_1 = variant { Ok : nat; Err : text };
 service : {
+  // Adds the platform orchestrator and actions principal as controllers to a target canister.
+  // This is used during harvest recovery for canisters that don't have PO as a controller.
+  // The calling canister must be a controller of the target canister for this to succeed.
+  // 
+  // Args:
+  // target_canister_id - The canister to add controllers to
+  // 
+  // Returns:
+  // Ok(()) on success, Err(String) on failure
+  add_controllers : (principal) -> (Result);
   // Sends (current_balance - reserve) cycles to the platform_orchestrator via deposit_cycles.
   // The reserve (passed by the caller) is left behind to cover execution + call overhead.
   // This matches dfx's approach for canister delete/withdrawal (30B base WITHDRAWAL_COST + retry increases).
@@ -8,5 +19,5 @@ service : {
   // this wasm to be running.
   // 
   // Returns the number of cycles transferred (or 0 on early exit).
-  return_cycle_balance_to_platform_orchestrator : (nat) -> (Result);
+  return_cycle_balance_to_platform_orchestrator : (nat) -> (Result_1);
 }

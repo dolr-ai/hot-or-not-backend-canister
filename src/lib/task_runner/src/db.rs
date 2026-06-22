@@ -95,8 +95,7 @@ async fn ensure_schema(pool: &SqlitePool) -> Result<()> {
 
     sqlx::query!(
         "CREATE TABLE IF NOT EXISTS cycle_harvest_failures (
-            id        INTEGER PRIMARY KEY AUTOINCREMENT,
-            principal TEXT NOT NULL,
+            principal TEXT PRIMARY KEY,
             reason    TEXT NOT NULL,
             failed_at TEXT NOT NULL
          )"
@@ -310,8 +309,7 @@ pub async fn failed_harvest_principals(pool: &SqlitePool, limit: i64) -> Result<
     .await?;
 
     rows.iter()
-        .filter_map(|r| r.principal.as_deref())
-        .map(|p| Principal::from_text(p).map_err(anyhow::Error::from))
+        .map(|r| Principal::from_text(&r.principal).map_err(anyhow::Error::from))
         .collect()
 }
 
@@ -357,8 +355,11 @@ pub async fn mark_harvest_failed(
     reason: &str,
 ) -> Result<()> {
     let text = principal.to_text();
+    // Upsert: replaces the row if principal already exists (keeps only latest failure per canister).
     sqlx::query!(
-        "INSERT INTO cycle_harvest_failures (principal, reason, failed_at) VALUES (?, ?, datetime('now'))",
+        "INSERT INTO cycle_harvest_failures (principal, reason, failed_at)
+         VALUES (?, ?, datetime('now'))
+         ON CONFLICT(principal) DO UPDATE SET reason = excluded.reason, failed_at = excluded.failed_at",
         text,
         reason
     )
