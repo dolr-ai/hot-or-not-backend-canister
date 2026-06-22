@@ -309,7 +309,8 @@ pub async fn failed_harvest_principals(pool: &SqlitePool, limit: i64) -> Result<
     .await?;
 
     rows.iter()
-        .map(|r| Principal::from_text(&r.principal).map_err(anyhow::Error::from))
+        .filter_map(|r| r.principal.as_deref())
+        .map(|p| Principal::from_text(p).map_err(anyhow::Error::from))
         .collect()
 }
 
