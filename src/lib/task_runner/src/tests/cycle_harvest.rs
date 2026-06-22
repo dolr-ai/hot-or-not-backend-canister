@@ -606,12 +606,32 @@ async fn harvest_canister(
         "absent".to_string()
     };
     println!(
-    	        "  post_install_balance: {} TC, post_install_reserved: {} TC, status: {:?}, module_hash: {}",
-    	        format_cycles(post_install_balance),
-    	        format_cycles(post_install_reserved),
-    	        post_install_status.status,
-    	        post_mod
-    	    );
+    	    "  post_install_balance: {} TC, post_install_reserved: {} TC, status: {:?}, module_hash: {}",
+    	    format_cycles(post_install_balance),
+    	    format_cycles(post_install_reserved),
+    	    post_install_status.status,
+    	    post_mod
+    	);
+
+    // Ensure the canister is running before attempting the transfer. If the canister
+    // is Stopped, `return_cycle_balance_to_platform_orchestrator` will fail with IC0508
+    // because a stopped canister cannot execute code. `start_canister` is idempotent for
+    // already-running canisters, but we only call it when actually needed to avoid
+    // unnecessary round-trips.
+    if matches!(post_install_status.status, CanisterStatus::Stopped) {
+        println!("  canister is stopped; starting it before transfer...");
+        agent
+            .update(
+                &Principal::from_text(MANAGEMENT_CANISTER).unwrap(),
+                "start_canister",
+            )
+            .with_arg(encode_args((CanisterIdRecord { canister_id },))?)
+            .with_effective_canister_id(canister_id)
+            .call_and_wait()
+            .await
+            .map_err(|e| anyhow::anyhow!("start_canister failed: {}", e))?;
+        println!("  ✓ canister started");
+    }
 
     // Step 6: Transfer cycles to PO, passing an explicit reserve (cycles to leave behind).
     // Start at 50B (batch runs showed 30B consistently insufficient after a fresh
