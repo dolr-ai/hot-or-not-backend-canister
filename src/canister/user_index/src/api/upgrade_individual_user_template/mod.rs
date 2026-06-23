@@ -1,4 +1,0 @@
-pub mod get_index_details_last_upgrade_status;
-pub mod update_user_index_upgrade_user_canisters_with_latest_wasm;
-pub mod upgrade_specific_individual_canister_with_wasm_version;
-pub mod upgrade_specific_individual_user_canister_with_latest_wasm;
