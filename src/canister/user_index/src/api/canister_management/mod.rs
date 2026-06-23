@@ -34,8 +34,6 @@ pub mod add_platform_orchestrator_as_controller_to_all_canisters;
 pub mod add_platform_orchestrator_as_controller_to_specific_canister;
 pub mod allot_empty_canister;
 pub mod create_pool_of_available_canisters;
-pub mod delete_all_sns_creator_token_in_the_network;
-pub mod delete_all_sns_creator_token_of_an_individual_canister;
 pub mod fixup_individual_canisters_mappings;
 pub mod get_backup_canister_sample;
 pub mod get_bulk_operation_status;
@@ -45,7 +43,6 @@ pub mod get_subnet_available_capacity;
 pub mod get_subnet_backup_capacity;
 pub mod make_individual_canister_logs_private;
 pub mod make_individual_canister_logs_public;
-pub mod notify_specific_individual_canister_to_upgrade_creator_dao_governance_canisters;
 pub mod provision_empty_canisters;
 pub mod receive_empty_canister_from_individual_canister;
 pub mod recharge_individual_user_canister;
@@ -55,7 +52,6 @@ pub mod reset_user_canister_ml_feed_cache;
 pub mod start_upgrades_for_individual_canisters;
 pub mod uninstall_individual_user_canister;
 pub mod update_user_canister_restart_timers;
-pub mod upgrade_all_creator_dao_governance_canisters_in_the_network;
 
 #[update]
 pub async fn get_user_canister_status(

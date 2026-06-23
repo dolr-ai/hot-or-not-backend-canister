@@ -165,21 +165,4 @@ impl RegisteredIndividualUserCanister {
         alloted_canister_id_res
     }
 
-    pub async fn delete_all_sns_creator_token(&self) -> Result<(), String> {
-        ic_cdk::call::<_, ()>(self.canister_id, "delete_all_creator_token", ())
-            .await
-            .map_err(|e| e.1)
     }
-
-    pub fn notify_to_upgrade_creator_dao_governance_canisters(
-        &self,
-        wasm_module: Vec<u8>,
-    ) -> Result<(), String> {
-        ic_cdk::notify::<_>(
-            self.canister_id,
-            "upgrade_creator_dao_governance_canisters",
-            (wasm_module,),
-        )
-        .map_err(|e| format!("Error: {:?}", e))
-    }
-}

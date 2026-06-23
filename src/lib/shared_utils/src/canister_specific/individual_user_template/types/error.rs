@@ -43,37 +43,6 @@ pub enum FollowAnotherUserProfileError {
 }
 
 #[derive(CandidType, Deserialize, PartialEq, Eq, Debug)]
-pub enum CdaoDeployError {
-    Unregistered,
-    TokenLimit(usize),
-    CallError(RejectionCode, String),
-    InvalidInitPayload(String),
-    Unauthenticated,
-    CycleError(String),
-}
-
-impl From<(RejectionCode, String)> for CdaoDeployError {
-    fn from((rejection_code, error_message): (RejectionCode, String)) -> Self {
-        CdaoDeployError::CallError(rejection_code, error_message)
-    }
-}
-
-#[derive(CandidType, Deserialize, PartialEq, Eq, Debug)]
-pub enum CdaoTokenError {
-    InvalidRoot,
-    Transfer(TransferError),
-    NoBalance,
-    CallError(RejectionCode, String),
-    Unauthenticated,
-}
-
-impl From<(RejectionCode, String)> for CdaoTokenError {
-    fn from(value: (RejectionCode, String)) -> Self {
-        CdaoTokenError::CallError(value.0, value.1)
-    }
-}
-
-#[derive(CandidType, Deserialize, PartialEq, Eq, Debug)]
 pub enum AirdropError {
     CanisterPrincipalDoNotMatch,
     AlreadyClaimedAirdrop,

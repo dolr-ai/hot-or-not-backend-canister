@@ -52,10 +52,6 @@ type IndividualCanisterDetails = record {
   controllers : vec principal;
   cycle_balance : nat;
 };
-type IndividualUserCreatorDaoEntry = record {
-  deployed_canisters : vec principal;
-  individual_profile_id : principal;
-};
 type KnownPrincipalType = variant {
   CanisterIdUserIndex;
   CanisterIdPlatformOrchestrator;
@@ -98,11 +94,7 @@ type RejectionCode = variant {
 type Result = variant { Ok : text; Err : text };
 type Result_1 = variant { Ok; Err : text };
 type Result_2 = variant { Ok : principal; Err : text };
-type Result_3 = variant {
-  Ok : vec record { principal; IndividualUserCreatorDaoEntry };
-  Err : text;
-};
-type Result_4 = variant { Ok : IndividualCanisterDetails; Err : text };
+type Result_3 = variant { Ok : IndividualCanisterDetails; Err : text };
 type Result_5 = variant {
   Ok : record { CanisterStatusResponse };
   Err : record { RejectionCode; text };
@@ -143,12 +135,7 @@ service : (UserIndexInitArgs) -> {
   allot_empty_canister : () -> (Result_2);
   are_signups_enabled : () -> (bool) query;
   clear_snapshot : () -> ();
-  collect_creator_dao_stats_in_the_network : () -> (Result_3);
   create_pool_of_individual_user_available_canisters : (text, blob) -> (Result);
-  delete_all_sns_creator_token_in_the_network : () -> ();
-  delete_all_sns_creator_token_of_an_individual_canister : (principal) -> (
-      Result_1,
-    );
   download_snapshot : (nat64, nat64) -> (blob) query;
   fixup_individual_canisters_mapping : () -> ();
   get_backup_canister_sample : (nat64) -> (vec principal) query;
@@ -160,7 +147,7 @@ service : (UserIndexInitArgs) -> {
     ) query;
   get_index_details_is_user_name_taken : (text) -> (bool) query;
   get_index_details_last_upgrade_status : () -> (UpgradeStatus) query;
-  get_individual_canister_details : (principal) -> (Result_4);
+  get_individual_canister_details : (principal) -> (Result_3);
   get_last_broadcast_call_status : () -> (BroadcastCallStatus) query;
   get_list_of_available_canisters : () -> (vec principal) query;
   get_recycle_status : () -> (RecycleStatus) query;
@@ -192,15 +179,8 @@ service : (UserIndexInitArgs) -> {
   load_snapshot : () -> ();
   make_individual_canister_logs_private : (principal) -> (Result_1);
   make_individual_canister_logs_public : (principal) -> (Result_1);
-  notify_specific_individual_canister_to_upgrade_creator_dao_governance_canisters : (
-      principal,
-      blob,
-    ) -> (Result_1);
   provision_empty_canisters : (nat64) -> ();
   receive_and_save_snaphot : (nat64, blob) -> ();
-  receive_creator_dao_stats_from_individual_canister : (vec principal) -> (
-      Result_1,
-    );
   receive_empty_canister_from_individual_canister : (vec principal) -> (
       Result_1,
     );
@@ -224,7 +204,6 @@ service : (UserIndexInitArgs) -> {
   update_profile_owner_for_individual_canisters : () -> ();
   update_restart_timers_hon_game : () -> (text);
   update_well_known_principal : (KnownPrincipalType, principal) -> ();
-  upgrade_all_creator_dao_governance_canisters_in_the_network : (blob) -> ();
   upgrade_specific_individual_canister_with_wasm_version : (
       principal,
       text,
