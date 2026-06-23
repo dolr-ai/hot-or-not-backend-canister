@@ -3,7 +3,7 @@ use crate::constant::{
     ASSUMED_NUMBER_OF_INSTRUCTIONS_PER_INGRESS_CALL, BASE_COST_FOR_EXECUTION,
     BASE_COST_FOR_INGRESS_MESSAGE, COST_PER_BILLION_INSTRUCTION_EXECUTED,
     COST_PER_BYTE_FOR_INGRESS_MESSAGE, DEFAULT_FREEZING_THRESHOLD,
-    MAX_AMOUNT_OF_RECHARGE_FOR_INDIVIDUAL_CANISTER, MAX_NUMBER_OF_DAYS_TO_KEEP_CANISTER_RUNNING,
+    MAX_NUMBER_OF_DAYS_TO_KEEP_CANISTER_RUNNING,
     RESERVED_NUMBER_OF_INSTRUCTIONS_FOR_INSTALL_CODE,
     THRESHOLD_NUMBER_OF_DAYS_TO_KEEP_CANISTER_RUNNING,
 };
@@ -101,8 +101,6 @@ pub fn calculate_threshold_and_recharge_cycles_for_canister(
 
     threshold_cycles_to_keep_canister_running += threshold_compute_cost_for_canister;
     recharge_amount_for_canister += recharge_compute_cost_for_canister;
-    recharge_amount_for_canister =
-        recharge_amount_for_canister.min(MAX_AMOUNT_OF_RECHARGE_FOR_INDIVIDUAL_CANISTER); //maximum 3T cycles alloted
     (
         threshold_cycles_to_keep_canister_running,
         recharge_amount_for_canister,
@@ -134,7 +132,6 @@ mod test {
         let (threshold, recharge) =
             calculate_threshold_and_recharge_cycles_for_canister(27_000_000, 0, None);
         assert!(recharge > threshold);
-        assert!(recharge < MAX_AMOUNT_OF_RECHARGE_FOR_INDIVIDUAL_CANISTER);
     }
 
     #[test]
@@ -147,7 +144,6 @@ mod test {
         );
 
         assert!(recharge > threshold);
-        assert!(recharge < MAX_AMOUNT_OF_RECHARGE_FOR_INDIVIDUAL_CANISTER);
     }
 
     #[test]
@@ -161,6 +157,5 @@ mod test {
         );
 
         assert!(recharge > threshold);
-        assert!(recharge < MAX_AMOUNT_OF_RECHARGE_FOR_INDIVIDUAL_CANISTER);
     }
 }

@@ -12,11 +12,6 @@ type BulkIndividualCanisterOperationStatus = record {
   completed_count : nat64;
   canisters_remaining : vec principal;
 };
-type CanisterInstallMode = variant {
-  reinstall;
-  upgrade : opt opt bool;
-  install;
-};
 type CanisterStatusResponse = record {
   status : CanisterStatusType;
   memory_size : nat;
@@ -48,10 +43,6 @@ type HttpResponse = record {
   headers : vec record { text; text };
   status_code : nat16;
 };
-type IndividualCanisterDetails = record {
-  controllers : vec principal;
-  cycle_balance : nat;
-};
 type KnownPrincipalType = variant {
   CanisterIdUserIndex;
   CanisterIdPlatformOrchestrator;
@@ -75,13 +66,6 @@ type QueryStats = record {
   num_calls_total : nat;
   request_payload_bytes_total : nat;
 };
-type RecycleStatus = record {
-  last_recycled_duration : opt nat64;
-  last_recycled_at : opt SystemTime;
-  num_last_recycled_canisters : nat64;
-  success_canisters : vec text;
-  failed_recycling : vec record { principal; text };
-};
 type RejectionCode = variant {
   NoError;
   CanisterError;
@@ -93,8 +77,6 @@ type RejectionCode = variant {
 };
 type Result = variant { Ok : text; Err : text };
 type Result_1 = variant { Ok; Err : text };
-type Result_2 = variant { Ok : principal; Err : text };
-type Result_3 = variant { Ok : IndividualCanisterDetails; Err : text };
 type Result_5 = variant {
   Ok : record { CanisterStatusResponse };
   Err : record { RejectionCode; text };
@@ -108,13 +90,6 @@ type SetUniqueUsernameError = variant {
 type SystemTime = record {
   nanos_since_epoch : nat32;
   secs_since_epoch : nat64;
-};
-type UpgradeStatus = record {
-  version_number : nat64;
-  version : text;
-  last_run_on : SystemTime;
-  failed_canister_ids : vec record { principal; principal; text };
-  successful_upgrade_count : nat32;
 };
 type UserAccessRole = variant {
   CanisterController;
@@ -132,12 +107,9 @@ service : (UserIndexInitArgs) -> {
   add_platform_orchestrator_as_controller_to_specific_canister : (
       principal,
     ) -> (Result_1);
-  allot_empty_canister : () -> (Result_2);
   are_signups_enabled : () -> (bool) query;
   clear_snapshot : () -> ();
-  create_pool_of_individual_user_available_canisters : (text, blob) -> (Result);
   download_snapshot : (nat64, nat64) -> (blob) query;
-  fixup_individual_canisters_mapping : () -> ();
   get_backup_canister_sample : (nat64) -> (vec principal) query;
   get_bulk_operation_status : () -> (
       BulkIndividualCanisterOperationStatus,
@@ -146,27 +118,10 @@ service : (UserIndexInitArgs) -> {
       vec record { KnownPrincipalType; principal },
     ) query;
   get_index_details_is_user_name_taken : (text) -> (bool) query;
-  get_index_details_last_upgrade_status : () -> (UpgradeStatus) query;
-  get_individual_canister_details : (principal) -> (Result_3);
   get_last_broadcast_call_status : () -> (BroadcastCallStatus) query;
-  get_list_of_available_canisters : () -> (vec principal) query;
-  get_recycle_status : () -> (RecycleStatus) query;
-  get_requester_principals_canister_id_create_if_not_exists : () -> (Result_2);
-  get_requester_principals_canister_id_create_if_not_exists_and_optionally_allow_referrer : () -> (
-      principal,
-    );
   get_subnet_available_capacity : () -> (nat64) query;
   get_subnet_backup_capacity : () -> (nat64) query;
-  get_user_canister_id_from_unique_user_name : (text) -> (opt principal) query;
-  get_user_canister_id_from_user_principal_id : (principal) -> (
-      opt principal,
-    ) query;
-  get_user_canister_incl_avail_list : () -> (vec principal) query;
-  get_user_canister_list : () -> (vec principal) query;
   get_user_canister_status : (principal) -> (Result_5);
-  get_user_id_and_canister_list : () -> (
-      vec record { principal; principal },
-    ) query;
   get_user_index_canister_count : () -> (nat64) query;
   get_user_index_canister_cycle_balance : () -> (nat) query;
   get_version : () -> (text) query;
@@ -175,44 +130,18 @@ service : (UserIndexInitArgs) -> {
       opt principal,
     ) query;
   http_request : (HttpRequest) -> (HttpResponse) query;
-  issue_rewards_for_referral : (principal, principal, principal) -> (Result);
   load_snapshot : () -> ();
-  make_individual_canister_logs_private : (principal) -> (Result_1);
-  make_individual_canister_logs_public : (principal) -> (Result_1);
-  provision_empty_canisters : (nat64) -> ();
   receive_and_save_snaphot : (nat64, blob) -> ();
-  receive_empty_canister_from_individual_canister : (vec principal) -> (
-      Result_1,
-    );
-  recharge_individual_user_canister : () -> (Result_1);
   reclaim_cycles_from_individual_canisters : () -> ();
   redeem_gdollr : (principal, nat) -> (Result_1);
   request_cycles : (nat) -> (Result_1);
-  reset_user_canisters_ml_feed_cache : () -> (text);
-  reset_user_individual_canisters : (vec principal) -> (Result);
   return_cycles_to_platform_orchestrator_canister : () -> (Result);
   save_snapshot_json : () -> (nat32);
-  set_permission_to_upgrade_individual_canisters : (bool) -> (text);
-  start_upgrades_for_individual_canisters : (text, blob) -> (text);
   toggle_signups_enabled : () -> (Result_1);
-  uninstall_individual_user_canister : (principal) -> (Result_1);
   update_index_with_unique_user_name_corresponding_to_user_principal_id : (
       text,
       principal,
     ) -> (Result_6);
   update_pd_onboarding_reward_for_all_individual_users : (nat) -> (Result_1);
-  update_profile_owner_for_individual_canisters : () -> ();
-  update_restart_timers_hon_game : () -> (text);
   update_well_known_principal : (KnownPrincipalType, principal) -> ();
-  upgrade_specific_individual_canister_with_wasm_version : (
-      principal,
-      text,
-      blob,
-    ) -> (Result_1);
-  upgrade_specific_individual_user_canister_with_latest_wasm : (
-      principal,
-      opt principal,
-      opt CanisterInstallMode,
-    ) -> (Result_1);
-  validate_reset_user_individual_canisters : (vec principal) -> (Result) query;
 }

@@ -2,6 +2,7 @@ use std::cell::RefCell;
 
 use candid::{Principal, Nat};
 use data_model::CanisterData;
+use data_model::bulk_individual_canister_operation_status::BulkIndividualCanisterOperationStatus;
 use ic_cdk::api::{
     call::CallResult,
     management_canister::main::CanisterStatusResponse,
