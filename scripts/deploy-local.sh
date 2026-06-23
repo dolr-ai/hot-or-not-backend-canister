@@ -3,12 +3,11 @@
 # Mirrors the mainnet release flow as closely as possible:
 #   1. Build + regenerate Candid interfaces
 #   2. Deploy platform_orchestrator
-#   3. Build user_index and individual_user_template via dfx (wasm-opt + gzip)
+#   3. Build user_index via dfx (wasm-opt + gzip)
 #   4. Upload optimized wasm blobs to platform_orchestrator via ic-repl
 #   5. Create user_index with platform_orchestrator as controller (CMC substitute)
 #   6. platform_orchestrator installs the user_index wasm (mirrors governance upgrade)
 #   7. Register user_index with platform_orchestrator
-#   8. Provision a pool of individual user canisters via user_index
 #
 # Wasm upload uses ic-repl (binary Candid) so the payload stays small.
 # dfx build applies wasm-opt (-Os) + gzip: user_index 2.1 MB → 617 KB.
@@ -34,7 +33,7 @@ VERSION="v0.0.1-local"
 
 # ── Build: Candid interfaces + raw wasms ──────────────────────────────────────
 echo "==> Building canisters and regenerating Candid interfaces..."
-bash scripts/generate-candid.sh platform_orchestrator user_index individual_user_template
+bash scripts/generate-candid.sh platform_orchestrator user_index
 
 # ── Download ic-repl if not present ──────────────────────────────────────────
 if [[ ! -x ./ic-repl ]]; then
@@ -66,19 +65,14 @@ dfx deploy platform_orchestrator \
 PLATFORM_ORCHESTRATOR_ID="$(dfx canister id platform_orchestrator)"
 echo "    platform_orchestrator: ${PLATFORM_ORCHESTRATOR_ID}"
 
-# ── Build user_index and individual_user_template via dfx ────────────────────
+# ── Build user_index via dfx ────────────────────────────────────────────────
 # dfx build applies wasm-opt (-Os) + gzip (per dfx.json: optimize=size, gzip=true).
-# user_index: 2.1 MB raw → 617 KB; individual_user_template: 451 KB → 132 KB.
+# user_index: 2.1 MB raw → 617 KB.
 # This keeps the ic-repl upload payloads well within the 4 MB HTTP body limit.
 echo "==> Building user_index (wasm-opt + gzip)..."
 dfx canister create user_index
 dfx build user_index
 USER_INDEX_WASM=".dfx/local/canisters/user_index/user_index.wasm.gz"
-
-echo "==> Building individual_user_template (wasm-opt + gzip)..."
-dfx canister create individual_user_template
-dfx build individual_user_template
-INDIVIDUAL_TEMPLATE_WASM=".dfx/local/canisters/individual_user_template/individual_user_template.wasm.gz"
 
 # ── Upload optimized wasm blobs to platform_orchestrator ─────────────────────
 echo "==> Uploading wasms to platform_orchestrator via ic-repl..."
@@ -87,7 +81,6 @@ cat > /tmp/upload_wasms_local.sh << ICREPL
 identity deployer "${DFX_IDENTITY_PEM}";
 import po = "${PLATFORM_ORCHESTRATOR_ID}" as "${REPO_ROOT}/src/canister/platform_orchestrator/can.did";
 call po.upload_wasms(variant {SubnetOrchestratorWasm}, file("${REPO_ROOT}/${USER_INDEX_WASM}"));
-call po.upload_wasms(variant {IndividualUserWasm}, file("${REPO_ROOT}/${INDIVIDUAL_TEMPLATE_WASM}"));
 ICREPL
 ./ic-repl /tmp/upload_wasms_local.sh -r "${LOCAL_REPLICA}"
 rm -f /tmp/upload_wasms_local.sh
@@ -130,27 +123,9 @@ echo "==> platform_orchestrator upgrading user_index with stored wasm (mirrors g
 dfx canister call platform_orchestrator upgrade_subnet_orchestrator_canister_with_latest_wasm \
   "(principal \"${USER_INDEX_ID}\")"
 
-# ── Provision individual canister pool via user_index ─────────────────────────
-# On mainnet, provision_subnet_orchestrator_canister calls
-# create_pool_of_individual_user_available_canisters on user_index after installing it.
-echo "==> Provisioning individual canister pool via user_index..."
-cat > /tmp/provision_pool_local.sh << ICREPL
-#!/usr/bin/ic-repl -o
-identity deployer "${DFX_IDENTITY_PEM}";
-import ui = "${USER_INDEX_ID}" as "${REPO_ROOT}/src/canister/user_index/can.did";
-call ui.create_pool_of_individual_user_available_canisters("${VERSION}", file("${REPO_ROOT}/${INDIVIDUAL_TEMPLATE_WASM}"));
-ICREPL
-./ic-repl /tmp/provision_pool_local.sh -r "${LOCAL_REPLICA}"
-rm -f /tmp/provision_pool_local.sh
-
 echo ""
 echo "════════════════════════════════════════════════════════════════"
 echo " Deployment complete."
 echo "  platform_orchestrator : ${PLATFORM_ORCHESTRATOR_ID}"
 echo "  user_index            : ${USER_INDEX_ID}"
-echo ""
-echo " Validate with:"
-echo "   dfx canister call user_index get_bulk_operation_status"
-echo "   dfx canister call user_index add_platform_orchestrator_as_controller_to_all_canisters"
-echo "   dfx canister call user_index add_platform_orchestrator_as_controller_to_specific_canister '(principal \"${USER_INDEX_ID}\")'"
 echo "════════════════════════════════════════════════════════════════"

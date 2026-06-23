@@ -185,9 +185,6 @@ pub fn get_new_pocket_ic_env() -> (PocketIc, KnownPrincipalMap) {
     let platform_orchestrator_wasm = include_bytes!(
         "../../../../../../target/wasm32-unknown-unknown/release/platform_orchestrator.wasm.gz"
     );
-    let individual_user_template = include_bytes!(
-        "../../../../../../target/wasm32-unknown-unknown/release/individual_user_template.wasm.gz"
-    );
     let subnet_orchestrator_canister_wasm = include_bytes!(
         "../../../../../../target/wasm32-unknown-unknown/release/user_index.wasm.gz"
     );
@@ -211,18 +208,6 @@ pub fn get_new_pocket_ic_env() -> (PocketIc, KnownPrincipalMap) {
             candid::encode_args((
                 WasmType::SubnetOrchestratorWasm,
                 subnet_orchestrator_canister_wasm.to_vec(),
-            ))
-            .unwrap(),
-        )
-        .unwrap();
-    pocket_ic
-        .update_call(
-            platform_canister_id,
-            super_admin,
-            "upload_wasms",
-            candid::encode_args((
-                WasmType::IndividualUserWasm,
-                individual_user_template.to_vec(),
             ))
             .unwrap(),
         )
