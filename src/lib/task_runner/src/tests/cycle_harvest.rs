@@ -1876,6 +1876,11 @@ fn get_canister_controllers(
 }
 
 /// Harvest a canister where PO is not a controller, using parent recovery.
+/// Maximum recursion depth for parent recovery.
+/// Each level tries to harvest a parent canister that may itself need parent recovery.
+/// 5 is generous — real chains are typically 1-2 levels deep.
+const MAX_PARENT_RECOVERY_DEPTH: usize = 5;
+
 async fn harvest_with_parent_recovery(
     agent: &ic_agent::Agent,
     actions_principal: Principal,
@@ -1885,6 +1890,41 @@ async fn harvest_with_parent_recovery(
     pool: &sqlx::SqlitePool,
     root: &std::path::Path,
 ) -> Result<u128> {
+    let mut visited = HashSet::new();
+    visited.insert(child_id);
+    harvest_with_parent_recovery_inner(
+        agent,
+        actions_principal,
+        po,
+        child_id,
+        wasm_blob,
+        pool,
+        root,
+        0,
+        &mut visited,
+    )
+    .await
+}
+
+async fn harvest_with_parent_recovery_inner(
+    agent: &ic_agent::Agent,
+    actions_principal: Principal,
+    po: Principal,
+    child_id: Principal,
+    wasm_blob: &[u8],
+    pool: &sqlx::SqlitePool,
+    root: &std::path::Path,
+    depth: usize,
+    visited: &mut HashSet<Principal>,
+) -> Result<u128> {
+    if depth >= MAX_PARENT_RECOVERY_DEPTH {
+        anyhow::bail!(
+            "parent recovery depth limit ({}) reached for {}, giving up",
+            MAX_PARENT_RECOVERY_DEPTH,
+            child_id
+        );
+    }
+
     let management_canister = Principal::from_text(MANAGEMENT_CANISTER)?;
 
     // Get the parent controller from the child canister via dfx
@@ -1918,211 +1958,243 @@ async fn harvest_with_parent_recovery(
         return Ok(transferred);
     }
 
-    // Find a valid canister parent (skip user principals — they're not harvestable).
-    let parent_id = controllers.iter().find(|c| !is_user_principal(c))
-        .ok_or_else(|| anyhow::anyhow!(
-            "child {} has only user principals as controllers (no canister parent found)",
+    // Find all valid canister parents (skip user principals — they're not harvestable).
+    // Also skip canisters we've already visited in this recovery chain to break cycles.
+    let canister_parents: Vec<Principal> = controllers
+        .iter()
+        .filter(|c| !is_user_principal(c))
+        .filter(|c| !visited.contains(c))
+        .cloned()
+        .collect();
+
+    if canister_parents.is_empty() {
+        anyhow::bail!(
+            "child {} has no unvisited canister parents (all are user principals or already visited)",
             child_id
-        ))?
-        .clone();
-
-    println!("  Child {} controlled by parent {}", child_id, parent_id);
-
-    // Check if parent is already harvested
-    let parent_harvested = sqlx::query_scalar!(
-        "SELECT 1 FROM cycle_harvested WHERE principal = ?",
-        parent_id.to_text()
-    )
-    .fetch_optional(pool)
-    .await?
-    .is_some();
-
-    if !parent_harvested {
-        println!(
-            "  Parent {} is not yet harvested, harvesting it first...",
-            parent_id
         );
+    }
 
-        // Pre-harvest deposit for parent too
-        if let Err(e) = ensure_canister_has_cycles(agent, po, parent_id).await {
-            println!("  ⚠ pre-harvest deposit for parent failed: {}", e);
-        }
+    // Try each canister parent in order. The first one that works wins.
+    let mut last_error = None;
+    for parent_id in &canister_parents {
+        println!("  Child {} trying parent {}", child_id, parent_id);
 
-        // Try to harvest the parent first (this may itself recurse if parent also
-        // needs parent recovery). We cap recursion by checking if parent == child.
-        if parent_id == child_id {
-            anyhow::bail!(
-                "parent {} is the same as child, infinite recursion detected",
+        // Mark this parent as visited to prevent cycles.
+        visited.insert(*parent_id);
+
+        // Check if parent is already harvested
+        let parent_harvested = sqlx::query_scalar!(
+            "SELECT 1 FROM cycle_harvested WHERE principal = ?",
+            parent_id.to_text()
+        )
+        .fetch_optional(pool)
+        .await?
+        .is_some();
+
+        if !parent_harvested {
+            println!(
+                "  Parent {} is not yet harvested, harvesting it first...",
+                parent_id
+            );
+
+            // Pre-harvest deposit for parent too
+            if let Err(e) = ensure_canister_has_cycles(agent, po, *parent_id).await {
+                println!("  ⚠ pre-harvest deposit for parent failed: {}", e);
+            }
+
+            // Attempt normal harvest on parent first.
+            match harvest_canister(agent, actions_principal, po, *parent_id, wasm_blob).await {
+                Ok((pre_balance, pre_reserved, post_uninstall, transferred, topped_up)) => {
+                    mark_harvested(
+                        pool,
+                        parent_id,
+                        pre_balance,
+                        pre_reserved,
+                        post_uninstall,
+                        transferred,
+                        topped_up,
+                    )
+                    .await?;
+                    println!(
+                        "  ✓ parent harvested first, transferred {} TC",
+                        format_cycles(transferred)
+                    );
+                }
+                Err(e) => {
+                    let reason = e.to_string();
+                    // If parent also has controller issues, recurse into parent recovery.
+                    if is_controller_ownership_error(&reason) {
+                        println!(
+                            "  ⚠ parent harvest failed with controller error, \
+                             recursing into parent recovery for {}...",
+                            parent_id
+                        );
+                        match Box::pin(harvest_with_parent_recovery_inner(
+                            agent,
+                            actions_principal,
+                            po,
+                            *parent_id,
+                            wasm_blob,
+                            pool,
+                            root,
+                            depth + 1,
+                            visited,
+                        )).await
+                        {
+                            Ok(_) => {
+                                println!("  ✓ parent recovered via recursive parent recovery");
+                            }
+                            Err(recurse_err) => {
+                                println!(
+                                    "  ⚠ parent {} recursive recovery failed: {}, trying next parent...",
+                                    parent_id, recurse_err
+                                );
+                                last_error = Some(recurse_err);
+                                continue;
+                            }
+                        }
+                    } else {
+                        println!(
+                            "  ⚠ parent {} harvest failed (non-controller error): {}, trying next parent...",
+                            parent_id, reason
+                        );
+                        last_error = Some(anyhow::anyhow!(
+                            "parent {} harvest failed (non-controller error): {}",
+                            parent_id,
+                            reason
+                        ));
+                        continue;
+                    }
+                }
+            }
+        } else {
+            println!(
+                "  Parent {} is harvested, proceeding with recovery",
                 parent_id
             );
         }
 
-        // Attempt normal harvest on parent first.
-        match harvest_canister(agent, actions_principal, po, parent_id, wasm_blob).await {
-            Ok((pre_balance, pre_reserved, post_uninstall, transferred, topped_up)) => {
-                mark_harvested(
-                    pool,
-                    &parent_id,
-                    pre_balance,
-                    pre_reserved,
-                    post_uninstall,
-                    transferred,
-                    topped_up,
-                )
-                .await?;
-                println!(
-                    "  ✓ parent harvested first, transferred {} TC",
-                    format_cycles(transferred)
-                );
-            }
-            Err(e) => {
-                let reason = e.to_string();
-                // If parent also has controller issues, recurse into parent recovery.
-                if is_controller_ownership_error(&reason) {
-                    println!(
-                        "  ⚠ parent harvest failed with controller error, \
-                         recursing into parent recovery for {}...",
-                        parent_id
-                    );
-                    let _ = Box::pin(harvest_with_parent_recovery(
-                        agent,
-                        actions_principal,
-                        po,
-                        parent_id,
-                        wasm_blob,
-                        pool,
-                        root,
-                    )).await?;
-                    println!("  ✓ parent recovered via recursive parent recovery");
-                } else {
-                    anyhow::bail!(
-                        "parent {} harvest failed (non-controller error): {}",
-                        parent_id,
-                        reason
-                    );
-                }
-            }
-        }
-    } else {
+        // --- Parent is ready (harvested or just harvested). Now use it for recovery. ---
+
+        // Add actions_identity as controller of parent via PO
         println!(
-            "  Parent {} is harvested, proceeding with recovery",
+            "  Adding actions_identity as controller of parent {}...",
             parent_id
         );
+        let add_ctrl_arg = encode_args((parent_id,))?;
+        agent
+            .update(&po, "add_our_identity_as_controller")
+            .with_arg(add_ctrl_arg)
+            .call_and_wait()
+            .await
+            .map_err(|e| anyhow::anyhow!("add_our_identity_as_controller on parent failed: {}", e))?;
+        println!("  ✓ actions_identity added as controller of parent");
+
+        // Top up parent with cycles so it can afford wasm install
+        let deposit_arg = encode_args((parent_id, TOP_UP_AMOUNT))?;
+        agent
+            .update(&po, "deposit_cycles_to_canister")
+            .with_arg(deposit_arg)
+            .call_and_wait()
+            .await
+            .map_err(|e| anyhow::anyhow!("deposit_cycles_to_canister on parent failed: {}", e))?;
+        println!("  ✓ topped up parent with 0.5T");
+
+        // Install wasm on parent (now we have access as co-controller)
+        println!("  Installing wasm on parent {}...", parent_id);
+        let install_arg = encode_args((InstallCodeArgs {
+            mode: CanisterInstallMode::Reinstall,
+            canister_id: *parent_id,
+            wasm_module: wasm_blob.to_vec(),
+            arg: vec![],
+            sender_canister_version: None,
+        },))?;
+
+        agent
+            .update(&management_canister, "install_code")
+            .with_arg(install_arg)
+            .with_effective_canister_id(*parent_id)
+            .call_and_wait()
+            .await
+            .map_err(|e| anyhow::anyhow!("install_code on parent failed: {}", e))?;
+
+        println!("  \u{2713} wasm installed on parent");
+
+        // Call add_controllers(child_id) on parent
+        println!("  Calling add_controllers({}) on parent...", child_id);
+        let add_ctrl_arg = encode_args((child_id,))?;
+        let add_ctrl_response = agent
+            .update(parent_id, "add_controllers")
+            .with_arg(add_ctrl_arg)
+            .call_and_wait()
+            .await
+            .map_err(|e| anyhow::anyhow!("add_controllers call failed: {}", e))?;
+
+        let _: Result<(), String> = candid::decode_one(&add_ctrl_response)
+            .map_err(|e| anyhow::anyhow!("failed to decode add_controllers response: {}", e))?;
+
+        println!(
+            "  \u{2713} add_controllers succeeded, PO + actions principal now controllers of child"
+        );
+
+        // Harvest child using the normal, tested flow
+        println!("  Harvesting child {}...", child_id);
+        let (
+            child_pre_balance,
+            child_pre_reserved,
+            child_post_uninstall,
+            child_transferred,
+            child_topped_up,
+        ) = harvest_canister(agent, actions_principal, po, child_id, wasm_blob).await?;
+
+        mark_harvested(
+            pool,
+            &child_id,
+            child_pre_balance,
+            child_pre_reserved,
+            child_post_uninstall,
+            child_transferred,
+            child_topped_up,
+        )
+        .await?;
+        println!(
+            "  ✓ child harvested, transferred {} TC",
+            format_cycles(child_transferred)
+        );
+
+        // Re-harvest parent using the normal flow (wasm reinstall means it has reserved cycles again)
+        println!("  Re-harvesting parent {}...", parent_id);
+        let (
+            parent_pre_balance,
+            parent_pre_reserved,
+            parent_post_uninstall,
+            parent_transferred,
+            parent_topped_up,
+        ) = harvest_canister(agent, actions_principal, po, *parent_id, wasm_blob).await?;
+
+        mark_harvested(
+            pool,
+            parent_id,
+            parent_pre_balance,
+            parent_pre_reserved,
+            parent_post_uninstall,
+            parent_transferred,
+            parent_topped_up,
+        )
+        .await?;
+        println!(
+            "  ✓ parent re-harvested, transferred {} TC",
+            format_cycles(parent_transferred)
+        );
+
+        return Ok(child_transferred + parent_transferred);
     }
 
-    // Add actions_identity as controller of parent via PO (parent is PO-only after harvest)
-    println!(
-        "  Adding actions_identity as controller of parent {}...",
-        parent_id
-    );
-    let add_ctrl_arg = encode_args((parent_id,))?;
-    agent
-        .update(&po, "add_our_identity_as_controller")
-        .with_arg(add_ctrl_arg)
-        .call_and_wait()
-        .await
-        .map_err(|e| anyhow::anyhow!("add_our_identity_as_controller on parent failed: {}", e))?;
-    println!("  ✓ actions_identity added as controller of parent");
-
-    // Top up parent with cycles so it can afford wasm install
-    // (harvested canisters are often near-zero balance)
-    let deposit_arg = encode_args((parent_id, TOP_UP_AMOUNT))?;
-    agent
-        .update(&po, "deposit_cycles_to_canister")
-        .with_arg(deposit_arg)
-        .call_and_wait()
-        .await
-        .map_err(|e| anyhow::anyhow!("deposit_cycles_to_canister on parent failed: {}", e))?;
-    println!("  ✓ topped up parent with 0.5T");
-
-    // Install wasm on parent (now we have access as co-controller)
-    println!("  Installing wasm on parent {}...", parent_id);
-    let install_arg = encode_args((InstallCodeArgs {
-        mode: CanisterInstallMode::Reinstall,
-        canister_id: parent_id,
-        wasm_module: wasm_blob.to_vec(),
-        arg: vec![],
-        sender_canister_version: None,
-    },))?;
-
-    agent
-        .update(&management_canister, "install_code")
-        .with_arg(install_arg)
-        .with_effective_canister_id(parent_id)
-        .call_and_wait()
-        .await
-        .map_err(|e| anyhow::anyhow!("install_code on parent failed: {}", e))?;
-
-    println!("  \u{2713} wasm installed on parent");
-
-    // Call add_controllers(child_id) on parent
-    println!("  Calling add_controllers({}) on parent...", child_id);
-    let add_ctrl_arg = encode_args((child_id,))?;
-    let add_ctrl_response = agent
-        .update(&parent_id, "add_controllers")
-        .with_arg(add_ctrl_arg)
-        .call_and_wait()
-        .await
-        .map_err(|e| anyhow::anyhow!("add_controllers call failed: {}", e))?;
-
-    let _: Result<(), String> = candid::decode_one(&add_ctrl_response)
-        .map_err(|e| anyhow::anyhow!("failed to decode add_controllers response: {}", e))?;
-
-    println!(
-        "  \u{2713} add_controllers succeeded, PO + actions principal now controllers of child"
-    );
-
-    // Harvest child using the normal, tested flow
-    println!("  Harvesting child {}...", child_id);
-    let (
-        child_pre_balance,
-        child_pre_reserved,
-        child_post_uninstall,
-        child_transferred,
-        child_topped_up,
-    ) = harvest_canister(agent, actions_principal, po, child_id, wasm_blob).await?;
-
-    mark_harvested(
-        pool,
-        &child_id,
-        child_pre_balance,
-        child_pre_reserved,
-        child_post_uninstall,
-        child_transferred,
-        child_topped_up,
-    )
-    .await?;
-    println!(
-        "  ✓ child harvested, transferred {} TC",
-        format_cycles(child_transferred)
-    );
-
-    // Re-harvest parent using the normal flow (wasm reinstall means it has reserved cycles again)
-    println!("  Re-harvesting parent {}...", parent_id);
-    let (
-        parent_pre_balance,
-        parent_pre_reserved,
-        parent_post_uninstall,
-        parent_transferred,
-        parent_topped_up,
-    ) = harvest_canister(agent, actions_principal, po, parent_id, wasm_blob).await?;
-
-    mark_harvested(
-        pool,
-        &parent_id,
-        parent_pre_balance,
-        parent_pre_reserved,
-        parent_post_uninstall,
-        parent_transferred,
-        parent_topped_up,
-    )
-    .await?;
-    println!(
-        "  ✓ parent re-harvested, transferred {} TC",
-        format_cycles(parent_transferred)
-    );
-
-    Ok(child_transferred + parent_transferred)
+    // All parents failed — return the last error (or a generic message if none).
+    Err(last_error.unwrap_or_else(|| anyhow::anyhow!(
+        "all canister parents failed for child {}",
+        child_id
+    )))
 }
 
 /// Print a safe, read-only snapshot of the current harvest progress against the
