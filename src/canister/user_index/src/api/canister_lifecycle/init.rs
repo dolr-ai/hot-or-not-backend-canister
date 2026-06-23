@@ -21,8 +21,7 @@ fn init_impl(init_args: UserIndexInitArgs, data: &mut CanisterData) {
                 .known_principal_ids
                 .insert(*principal_belongs_to, *principal_id);
         });
-    data.allow_upgrades_for_individual_canisters = true;
-    data.last_run_upgrade_status.version = init_args.version;
+    data.version_details.version = init_args.version;
 }
 
 #[cfg(test)]
@@ -93,6 +92,6 @@ mod test {
                 .unwrap(),
             &get_mock_canister_id_user_index()
         );
-        assert!(data.last_run_upgrade_status.version.eq("v1.0.0"))
+        assert!(data.version_details.version.eq("v1.0.0"))
     }
 }

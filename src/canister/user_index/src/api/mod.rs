@@ -5,7 +5,6 @@ pub mod http;
 pub mod monitoring;
 pub mod pump_n_dump;
 pub mod snapshot;
-pub mod upgrade_individual_user_template;
 pub mod user_record;
 pub mod user_signup;
 pub mod version;
