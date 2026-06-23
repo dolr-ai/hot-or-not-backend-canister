@@ -1779,28 +1779,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "individual_user_template"
-version = "0.1.0"
-dependencies = [
- "candid",
- "ciborium",
- "futures",
- "hex",
- "ic-cdk 0.15.1",
- "ic-cdk-macros 0.16.0",
- "ic-cdk-timers",
- "ic-stable-structures",
- "icrc-ledger-types",
- "num-bigint",
- "serde",
- "serde_bytes",
- "serde_json",
- "serde_json_any_key",
- "shared_utils",
- "test_utils",
-]
-
-[[package]]
 name = "inferno"
 version = "0.11.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"

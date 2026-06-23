@@ -38,17 +38,6 @@
       "package": "data_backup",
       "type": "rust"
     },
-    "individual_user_template": {
-      "candid": "./src/canister/individual_user_template/can.did",
-      "declarations": {
-        "node_compatibility": true,
-        "output": "./export/declarations/individual_user_template"
-      },
-      "gzip": true,
-      "optimize": "size",
-      "package": "individual_user_template",
-      "type": "rust"
-    },
     "user_info_service": {
       "candid": "./src/canister/user_info_service/can.did",
       "declarations": {
