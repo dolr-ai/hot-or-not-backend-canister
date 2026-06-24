@@ -70,7 +70,7 @@
       "optimize": "size",
       "package": "rate_limits",
       "type": "rust"
-    },
+    }
   },
   "version": 1
 }
