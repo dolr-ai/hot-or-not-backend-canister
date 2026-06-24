@@ -2,8 +2,6 @@ use crate::common::types::known_principal::{KnownPrincipalMap, KnownPrincipalTyp
 use candid::Principal;
 pub const EMPTY_CANISTER_RECHARGE_AMOUNT: u128 = 700_000_000_000; //0.7T Cycles
 
-pub const SUBNET_ORCHESTRATOR_CANISTER_INITIAL_CYCLES: u128 = 2_500_000_000_000_000; //2.5kT Cycles
-pub const SUBNET_ORCHESTRATOR_CANISTER_CYCLES_THRESHOLD: u128 = 1_000_000_000_000_000; //1kT Cycles
 pub const USER_SNS_CANISTER_INITIAL_CYCLES: u128 = 500_000_000_000; //0.5T Cycles
 pub const PAGE_SIZE_RECHARGE_DIVIDER: u128 = 500; // 500 pages (recharge by page_size/page_size_recharge_divider * recharge_amount)
 

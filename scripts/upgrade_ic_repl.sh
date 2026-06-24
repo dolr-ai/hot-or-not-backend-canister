@@ -7,11 +7,6 @@ import governance_canister="6wcax-haaaa-aaaaq-aaava-cai";
 function generate_payload() {
     let canister_type = variant {Nothing};
 
-    if eq("${CANISTER_NAME}", "user_index") {
-        let canister_type = variant {SubnetOrchestratorWasm};
-    } else {
-        
-    };
     if eq("${CANISTER_NAME}", "individual_user_template") {
         let canister_type = variant {IndividualUserWasm};
     } else {

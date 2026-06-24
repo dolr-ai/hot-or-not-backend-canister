@@ -1,9 +1,6 @@
 use candid::Principal;
 use ic_cdk::api::management_canister::provisional::CanisterId;
-use shared_utils::{
-    common::types::known_principal::KnownPrincipalType, constant::GLOBAL_SUPER_ADMIN_USER_ID_V1,
-};
-use std::{fs::File, io::Read, path::PathBuf};
+use shared_utils::constant::GLOBAL_SUPER_ADMIN_USER_ID_V1;
 
 pub mod v1;
 
@@ -47,10 +44,6 @@ pub fn get_mock_canister_id_topic_cache() -> Principal {
     CanisterId::from_slice(&4_usize.to_ne_bytes())
 }
 
-pub fn get_mock_canister_id_user_index() -> Principal {
-    CanisterId::from_slice(&5_usize.to_ne_bytes())
-}
-
 pub fn get_mock_canister_id_configuration() -> Principal {
     CanisterId::from_slice(&6_usize.to_ne_bytes())
 }
@@ -73,40 +66,4 @@ pub fn get_mock_user_charlie_canister_id() -> Principal {
 
 pub fn get_mock_user_dan_canister_id() -> Principal {
     CanisterId::from_slice(&11_usize.to_ne_bytes())
-}
-
-pub fn get_user_index_canister_wasm() -> Vec<u8> {
-    let mut file_path = PathBuf::from(
-        std::env::var("CARGO_MANIFEST_DIR")
-            .expect("Failed to read CARGO_MANIFEST_DIR env variable"),
-    );
-    file_path.push("../../../../target/wasm32-unknown-unknown/release/user_index.wasm.gz");
-
-    let mut file = File::open(&file_path)
-        .unwrap_or_else(|_| panic!("Failed to open file: {}", file_path.to_str().unwrap()));
-    let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes).expect("Failed to read file");
-    bytes
-}
-
-pub fn get_canister_wasm(canister_type: KnownPrincipalType) -> Vec<u8> {
-    let mut bytes = Vec::new();
-
-    let mut file_path = PathBuf::from(
-        std::env::var("CARGO_MANIFEST_DIR")
-            .expect("Failed to read CARGO_MANIFEST_DIR env variable"),
-    );
-    file_path.push("../../../target/wasm32-unknown-unknown/release");
-
-    match canister_type {
-        KnownPrincipalType::CanisterIdUserIndex => {
-            file_path.push("user_index.wasm.gz");
-            let mut file = File::open(&file_path)
-                .unwrap_or_else(|_| panic!("Failed to open file: {}", file_path.to_str().unwrap()));
-            file.read_to_end(&mut bytes).expect("Failed to read file");
-        }
-
-        _ => panic!("Canister type not supported"),
-    };
-    bytes
 }

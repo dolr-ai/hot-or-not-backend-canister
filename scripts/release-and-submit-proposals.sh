@@ -13,8 +13,7 @@
 #
 # RELEASE_SCOPE controls which canisters are built and proposed:
 #   platform_orchestrator            — platform_orchestrator only
-#   platform_orchestrator_user_index — platform_orchestrator + user_index
-#   all (default)                    — platform_orchestrator + user_index + individual_user_template
+#   all (default)                    — platform_orchestrator + individual_user_template
 #
 # Prerequisites:
 #   - actions_identity.pem: paste your SNS proposal submitter PEM key into this file (gitignored)
@@ -31,24 +30,20 @@ RELEASE_SCOPE="${RELEASE_SCOPE:-all}"
 
 # Determine which subnet canisters to build and propose in addition to platform_orchestrator.
 # platform_orchestrator is always built and proposed via direct SNS upgrade.
-# Subnet canisters (user_index, individual_user_template) are proposed via the
+# Subnet canisters (individual_user_template) are proposed via the
 # platform_orchestrator's UpgradeSubnetCanisters generic function (id 4002).
 case "$RELEASE_SCOPE" in
   platform_orchestrator)
     SUBNET_CANISTERS_TO_BUILD=""
     SUBNET_CANISTERS_TO_UPGRADE=""
     ;;
-  platform_orchestrator_user_index)
-    SUBNET_CANISTERS_TO_BUILD="user_index"
-    SUBNET_CANISTERS_TO_UPGRADE="user_index"
-    ;;
   all)
-    SUBNET_CANISTERS_TO_BUILD="individual_user_template user_index"
-    SUBNET_CANISTERS_TO_UPGRADE="user_index individual_user_template"
+    SUBNET_CANISTERS_TO_BUILD="individual_user_template"
+    SUBNET_CANISTERS_TO_UPGRADE="individual_user_template"
     ;;
   *)
     echo "Error: Unknown RELEASE_SCOPE '${RELEASE_SCOPE}'."
-    echo "Valid values: platform_orchestrator, platform_orchestrator_user_index, all"
+    echo "Valid values: platform_orchestrator, all"
     exit 1
     ;;
 esac

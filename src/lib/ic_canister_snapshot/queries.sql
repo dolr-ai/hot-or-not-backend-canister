@@ -9,7 +9,7 @@
 -- Snapshot metadata (version, counts, timestamp)
 SELECT key, value FROM po_metadata ORDER BY key;
 
--- All 16 subnet orchestrators (user_index canisters)
+-- Subnet orchestrators (decommissioned — user_index canister removed)
 SELECT principal FROM po_subnet_orchestrators ORDER BY principal;
 
 -- Controlled canister count
@@ -45,7 +45,6 @@ WITH known_principals AS (
     UNION ALL SELECT '67bll-riaaa-aaaaq-aaauq-cai',  'DOLR AI Root'
     UNION ALL SELECT '6eexo-lqaaa-aaaaq-aaawa-cai',  'DOLR AI Swap'
     UNION ALL SELECT 'dc47w-kaaaa-aaaak-qav3q-cai',  'individual_user_template'
-    UNION ALL SELECT 'rimrc-piaaa-aaaao-aaljq-cai',  'user_index'
     UNION ALL SELECT 'ivkka-7qaaa-aaaas-qbg3q-cai',  'user_info_service'
     UNION ALL SELECT 'h2jgv-ayaaa-aaaas-qbh4a-cai',  'rate_limits'
     UNION ALL SELECT 'gxhc3-pqaaa-aaaas-qbh3q-cai',  'user_post_service'
@@ -95,7 +94,6 @@ WITH known_principals AS (
     UNION ALL SELECT '67bll-riaaa-aaaaq-aaauq-cai',  'DOLR AI Root'
     UNION ALL SELECT '6eexo-lqaaa-aaaaq-aaawa-cai',  'DOLR AI Swap'
     UNION ALL SELECT 'dc47w-kaaaa-aaaak-qav3q-cai',  'individual_user_template'
-    UNION ALL SELECT 'rimrc-piaaa-aaaao-aaljq-cai',  'user_index'
     UNION ALL SELECT 'ivkka-7qaaa-aaaas-qbg3q-cai',  'user_info_service'
     UNION ALL SELECT 'h2jgv-ayaaa-aaaas-qbh4a-cai',  'rate_limits'
     UNION ALL SELECT 'gxhc3-pqaaa-aaaas-qbh3q-cai',  'user_post_service'
@@ -143,7 +141,6 @@ WITH known_principals AS (
     UNION ALL SELECT '67bll-riaaa-aaaaq-aaauq-cai',  'DOLR AI Root'
     UNION ALL SELECT '6eexo-lqaaa-aaaaq-aaawa-cai',  'DOLR AI Swap'
     UNION ALL SELECT 'dc47w-kaaaa-aaaak-qav3q-cai',  'individual_user_template'
-    UNION ALL SELECT 'rimrc-piaaa-aaaao-aaljq-cai',  'user_index'
     UNION ALL SELECT 'ivkka-7qaaa-aaaas-qbg3q-cai',  'user_info_service'
     UNION ALL SELECT 'h2jgv-ayaaa-aaaas-qbh4a-cai',  'rate_limits'
     UNION ALL SELECT 'gxhc3-pqaaa-aaaas-qbh3q-cai',  'user_post_service'
@@ -183,7 +180,6 @@ WITH roots AS (
     UNION ALL SELECT '67bll-riaaa-aaaaq-aaauq-cai',  'DOLR AI Root'
     UNION ALL SELECT '6eexo-lqaaa-aaaaq-aaawa-cai',  'DOLR AI Swap'
     UNION ALL SELECT 'dc47w-kaaaa-aaaak-qav3q-cai',  'individual_user_template'
-    UNION ALL SELECT 'rimrc-piaaa-aaaao-aaljq-cai',  'user_index'
     UNION ALL SELECT 'ivkka-7qaaa-aaaas-qbg3q-cai',  'user_info_service'
     UNION ALL SELECT 'h2jgv-ayaaa-aaaas-qbh4a-cai',  'rate_limits'
     UNION ALL SELECT 'gxhc3-pqaaa-aaaas-qbh3q-cai',  'user_post_service'
@@ -233,7 +229,6 @@ WITH roots AS (
     UNION ALL SELECT '67bll-riaaa-aaaaq-aaauq-cai',  'DOLR AI Root'
     UNION ALL SELECT '6eexo-lqaaa-aaaaq-aaawa-cai',  'DOLR AI Swap'
     UNION ALL SELECT 'dc47w-kaaaa-aaaak-qav3q-cai',  'individual_user_template'
-    UNION ALL SELECT 'rimrc-piaaa-aaaao-aaljq-cai',  'user_index'
     UNION ALL SELECT 'ivkka-7qaaa-aaaas-qbg3q-cai',  'user_info_service'
     UNION ALL SELECT 'h2jgv-ayaaa-aaaas-qbh4a-cai',  'rate_limits'
     UNION ALL SELECT 'gxhc3-pqaaa-aaaas-qbh3q-cai',  'user_post_service'
@@ -282,7 +277,6 @@ WITH known_principals AS (
     UNION ALL SELECT '67bll-riaaa-aaaaq-aaauq-cai',  'DOLR AI Root'
     UNION ALL SELECT '6eexo-lqaaa-aaaaq-aaawa-cai',  'DOLR AI Swap'
     UNION ALL SELECT 'dc47w-kaaaa-aaaak-qav3q-cai',  'individual_user_template'
-    UNION ALL SELECT 'rimrc-piaaa-aaaao-aaljq-cai',  'user_index'
     UNION ALL SELECT 'ivkka-7qaaa-aaaas-qbg3q-cai',  'user_info_service'
     UNION ALL SELECT 'h2jgv-ayaaa-aaaas-qbh4a-cai',  'rate_limits'
     UNION ALL SELECT 'gxhc3-pqaaa-aaaas-qbh3q-cai',  'user_post_service'

@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, PartialOrd, Eq, Ord, CandidType)]
 pub enum WasmType {
-    SubnetOrchestratorWasm,
     IndividualUserWasm,
     PostCacheWasm,
 }

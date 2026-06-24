@@ -3,7 +3,7 @@
   "tasks": [
     {
       "label": "Local: Deploy canister suite and validate",
-      "detail": "Build canisters, start a clean local replica, deploy the full suite, and call the new functions to confirm they work",
+      "detail": "Build canisters, start a clean local replica, deploy platform_orchestrator, and validate",
       "type": "shell",
       "command": "bash scripts/deploy-local.sh",
       "group": "build",
@@ -51,7 +51,7 @@
     },
     {
       "label": "Mainnet: Monitor long-running task",
-      "detail": "Poll all user_indexes round-robin until the active long-running canister operation completes (edit monitor-long-running-task.sh to change what is polled)",
+      "detail": "Poll platform_orchestrator round-robin until the active long-running canister operation completes (edit monitor-long-running-task.sh to change what is polled)",
       "type": "shell",
       "command": "bash scripts/monitor-long-running-task.sh",
       "group": "build",
@@ -74,20 +74,8 @@
       "problemMatcher": []
     },
     {
-      "label": "Release: platform_orchestrator + user_index",
-      "detail": "Build and submit SNS upgrade proposals for platform_orchestrator and user_index",
-      "type": "shell",
-      "command": "RELEASE_SCOPE=platform_orchestrator_user_index bash scripts/release-and-submit-proposals.sh",
-      "group": "build",
-      "presentation": {
-        "reveal": "always",
-        "panel": "dedicated"
-      },
-      "problemMatcher": []
-    },
-    {
       "label": "Release: all canisters",
-      "detail": "Build and submit SNS upgrade proposals for platform_orchestrator, user_index, and individual_user_template",
+      "detail": "Build and submit SNS upgrade proposals for platform_orchestrator and individual_user_template",
       "type": "shell",
       "command": "bash scripts/release-and-submit-proposals.sh",
       "group": "build",

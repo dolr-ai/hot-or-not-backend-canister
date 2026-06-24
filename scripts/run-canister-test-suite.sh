@@ -15,7 +15,6 @@ trap cleanup EXIT
 
 for canister in \
   individual_user_template \
-  user_index \
   platform_orchestrator \
   user_post_service \
   user_info_service \
@@ -27,7 +26,6 @@ done
 for canister in \
   platform_orchestrator \
   individual_user_template \
-  user_index \
   user_post_service \
   user_info_service \
   rate_limits

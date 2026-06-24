@@ -4117,24 +4117,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "user_index"
-version = "0.1.0"
-dependencies = [
- "candid",
- "ciborium",
- "futures",
- "ic-cdk 0.15.1",
- "ic-cdk-macros 0.16.0",
- "ic-cdk-timers",
- "ic-stable-structures",
- "icrc-ledger-types",
- "serde",
- "serde_json",
- "shared_utils",
- "test_utils",
-]
-
-[[package]]
 name = "user_info_service"
 version = "0.1.0"
 dependencies = [

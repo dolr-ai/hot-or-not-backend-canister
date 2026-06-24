@@ -11,7 +11,6 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 ALL_CANISTERS=(
   individual_user_template
-  user_index
   platform_orchestrator
   user_post_service
   user_info_service

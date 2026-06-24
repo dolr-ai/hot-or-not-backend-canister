@@ -13,10 +13,8 @@ pub enum KnownPrincipalType {
     CanisterIdRootCanister,
     CanisterIdSNSController,
     CanisterIdTopicCacheIndex,
-    CanisterIdUserIndex,
     CanisterIdSnsGovernance,
     CanisterIdPlatformOrchestrator,
-    CanisterIdHotOrNotSubnetOrchestrator,
     CanisterIdSnsWasm,
     CanisterIdSnsLedger,
 }

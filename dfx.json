@@ -71,17 +71,6 @@
       "package": "rate_limits",
       "type": "rust"
     },
-    "user_index": {
-      "candid": "./src/canister/user_index/can.did",
-      "declarations": {
-        "node_compatibility": true,
-        "output": "./export/declarations/user_index"
-      },
-      "gzip": true,
-      "optimize": "size",
-      "package": "user_index",
-      "type": "rust"
-    }
   },
   "version": 1
 }

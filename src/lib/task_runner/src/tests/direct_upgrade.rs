@@ -18,14 +18,13 @@
 /// (the actions_identity.pem principal must be a controller of the PO).
 ///
 /// The code below is retained for reference / future adaptation of fleet-wide
-/// upgrade flows (user_index / individual templates are now driven from other
-/// entry points after the PO simplification). It will fail against current PO
+/// upgrade flows (individual templates are now driven from other entry points
+/// after the PO simplification). It will fail against current PO
 /// until the upload/upgrade paths are reimplemented outside PO or the tests
 /// are updated to the post-cleanup architecture.
 ///
 /// Run with:
 ///   cargo test -p task_runner -- --ignored upgrade_po_directly --nocapture
-///   cargo test -p task_runner -- --ignored upgrade_po_and_ui_directly --nocapture
 ///   cargo test -p task_runner -- --ignored upgrade_all_directly --nocapture
 ///   cargo test -p task_runner -- --ignored deploy_user_info_service_directly --nocapture
 use std::process::Command;
@@ -45,7 +44,6 @@ use crate::{
 pub enum WasmType {
     IndividualUserWasm,
     PostCacheWasm,
-    SubnetOrchestratorWasm,
 }
 
 #[derive(candid::CandidType, candid::Deserialize)]
@@ -60,9 +58,7 @@ pub struct UpgradeCanisterArg {
 enum ReleaseScope {
     /// platform_orchestrator only
     PoOnly,
-    /// platform_orchestrator + user_index fleet
-    PoAndUi,
-    /// platform_orchestrator + user_index + individual_user_template fleet
+    /// platform_orchestrator + individual_user_template fleet
     All,
 }
 
@@ -179,22 +175,16 @@ async fn upgrade_fleet(scope: ReleaseScope) -> Result<()> {
     // ── Step 1: Build canisters ────────────────────────────────────────────────
     let po_wasm_path = build_canister("platform_orchestrator")?;
 
-    let (ui_wasm_path, iu_wasm_path) = match scope {
-        ReleaseScope::PoOnly => (None, None),
-        ReleaseScope::PoAndUi => (Some(build_canister("user_index")?), None),
-        ReleaseScope::All => (
-            Some(build_canister("user_index")?),
-            Some(build_canister("individual_user_template")?),
-        ),
+    let (iu_wasm_path,) = match scope {
+        ReleaseScope::PoOnly => (None,),
+        ReleaseScope::All => (Some(build_canister("individual_user_template")?),),
     };
 
     // Regenerate Candid interfaces.
     match scope {
         ReleaseScope::PoOnly => regenerate_candid(&["platform_orchestrator"])?,
-        ReleaseScope::PoAndUi => regenerate_candid(&["platform_orchestrator", "user_index"])?,
         ReleaseScope::All => regenerate_candid(&[
             "platform_orchestrator",
-            "user_index",
             "individual_user_template",
         ])?,
     }
@@ -212,34 +202,6 @@ async fn upgrade_fleet(scope: ReleaseScope) -> Result<()> {
     // ── Step 3: Upgrade subnet canisters via PO API (ic-agent works fine for regular canisters) ──
     let agent = agent_from_pem(&pem_path).await?;
     let po = Principal::from_text(PLATFORM_ORCHESTRATOR_ID)?;
-
-    // ── Step 3: Upgrade user_index fleet (if in scope) ─────────────────────────
-    if let Some(ui_wasm_path) = ui_wasm_path {
-        let ui_wasm = std::fs::read(&ui_wasm_path)?;
-
-        println!("\n==> Uploading user_index wasm to platform_orchestrator...");
-        let upload_arg = Encode!(&WasmType::SubnetOrchestratorWasm, &ui_wasm)?;
-
-        agent
-            .update(&po, "upload_wasms")
-            .with_arg(upload_arg)
-            .call_and_wait()
-            .await?;
-
-        println!("✓ user_index wasm uploaded");
-
-        let ui_id = get_canister_id("user_index")?;
-        println!("==> Triggering user_index fleet upgrade...");
-        let trigger_arg = Encode!(&ui_id)?;
-
-        agent
-            .update(&po, "upgrade_subnet_orchestrator_canister_with_latest_wasm")
-            .with_arg(trigger_arg)
-            .call_and_wait()
-            .await?;
-
-        println!("✓ user_index fleet upgrade initiated");
-    }
 
     // ── Step 4: Upgrade individual_user_template fleet (if in scope) ───────────
     if let Some(iu_wasm_path) = iu_wasm_path {
@@ -275,7 +237,6 @@ async fn upgrade_fleet(scope: ReleaseScope) -> Result<()> {
 
     let scope_label = match scope {
         ReleaseScope::PoOnly => "platform_orchestrator",
-        ReleaseScope::PoAndUi => "platform_orchestrator + user_index",
         ReleaseScope::All => "all canisters",
     };
 
@@ -292,14 +253,7 @@ async fn upgrade_po_directly() -> Result<()> {
     upgrade_fleet(ReleaseScope::PoOnly).await
 }
 
-/// Upgrade platform_orchestrator + user_index fleet.
-#[tokio::test]
-#[ignore = "upgrades platform_orchestrator and user_index on mainnet — run explicitly"]
-async fn upgrade_po_and_ui_directly() -> Result<()> {
-    upgrade_fleet(ReleaseScope::PoAndUi).await
-}
-
-/// Upgrade the full fleet: platform_orchestrator, user_index, individual_user_template.
+/// Upgrade the full fleet: platform_orchestrator, individual_user_template.
 #[tokio::test]
 #[ignore = "upgrades all canisters on mainnet — run explicitly"]
 async fn upgrade_all_directly() -> Result<()> {

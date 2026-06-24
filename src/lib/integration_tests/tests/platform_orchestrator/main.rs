@@ -1,4 +1,0 @@
-pub mod provision_subnet_orchestrator_test;
-pub mod recharge_subnet_orchestrator_test;
-pub mod register_and_deregister_new_subnet_orchestrator_test;
-pub mod test_upgrade_subnet_orchestrator_canister_with_latest_wasm;

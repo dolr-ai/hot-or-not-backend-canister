@@ -14,7 +14,6 @@ use shared_utils::{
     },
     common::types::{
         known_principal::{KnownPrincipalMap, KnownPrincipalType},
-        wasm::WasmType,
     },
     constant::{GLOBAL_SUPER_ADMIN_USER_ID_V1, NNS_CYCLE_MINTING_CANISTER, NNS_LEDGER_CANISTER_ID},
 };
@@ -185,9 +184,6 @@ pub fn get_new_pocket_ic_env() -> (PocketIc, KnownPrincipalMap) {
     let platform_orchestrator_wasm = include_bytes!(
         "../../../../../../target/wasm32-unknown-unknown/release/platform_orchestrator.wasm.gz"
     );
-    let subnet_orchestrator_canister_wasm = include_bytes!(
-        "../../../../../../target/wasm32-unknown-unknown/release/user_index.wasm.gz"
-    );
     let platform_orchestrator_init_args = PlatformOrchestratorInitArgs {
         version: "v1.0.0".into(),
     };
@@ -200,18 +196,6 @@ pub fn get_new_pocket_ic_env() -> (PocketIc, KnownPrincipalMap) {
     for _ in 0..30 {
         pocket_ic.tick()
     }
-    pocket_ic
-        .update_call(
-            platform_canister_id,
-            super_admin,
-            "upload_wasms",
-            candid::encode_args((
-                WasmType::SubnetOrchestratorWasm,
-                subnet_orchestrator_canister_wasm.to_vec(),
-            ))
-            .unwrap(),
-        )
-        .unwrap();
     pocket_ic.add_cycles(platform_canister_id, 10_000_000_000_000_000);
 
     //Ledger Canister
