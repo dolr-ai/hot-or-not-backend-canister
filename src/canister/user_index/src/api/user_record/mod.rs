@@ -1,3 +1,0 @@
-pub mod get_index_details_is_user_name_taken;
-pub mod get_user_index_canister_count;
-pub mod update_index_with_unique_user_name_corresponding_to_user_principal_id;
