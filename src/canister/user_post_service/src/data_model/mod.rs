@@ -39,7 +39,6 @@ impl CanisterData {
         last_uuid_processed: Option<String>,
         limit: usize,
     ) -> FetchPostsResult {
-        let mut processed = 0;
         let mut posts = vec![];
 
         let mut last_processed_uuid = last_uuid_processed.clone();
@@ -51,7 +50,7 @@ impl CanisterData {
             None => self.posts.range(..),
         };
 
-        for (post_id, post) in range {
+        for (processed, (post_id, post)) in range.into_iter().enumerate() {
             if processed >= limit {
                 break;
             }
@@ -61,7 +60,6 @@ impl CanisterData {
             }
 
             last_processed_uuid = Some(post_id.clone());
-            processed += 1;
         }
 
         FetchPostsResult {

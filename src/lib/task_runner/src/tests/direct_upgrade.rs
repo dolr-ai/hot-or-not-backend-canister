@@ -116,19 +116,6 @@ fn regenerate_candid(canisters: &[&str]) -> Result<()> {
     Ok(())
 }
 
-/// Get a canister's ID from dfx.
-fn get_canister_id(name: &str) -> Result<Principal> {
-    let root = workspace_root();
-    let output = Command::new("dfx")
-        .env("DFX_WARNING", "-mainnet_plaintext_identity")
-        .args(["canister", "id", name, "--network=ic"])
-        .current_dir(&root)
-        .output()
-        .context("dfx not found")?;
-    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    Principal::from_text(&text).with_context(|| format!("invalid principal for {name}: {text}"))
-}
-
 /// Upgrade a canister via dfx CLI (reliable for management canister calls).
 fn upgrade_canister_via_dfx(
     canister_name: &str,
@@ -183,10 +170,9 @@ async fn upgrade_fleet(scope: ReleaseScope) -> Result<()> {
     // Regenerate Candid interfaces.
     match scope {
         ReleaseScope::PoOnly => regenerate_candid(&["platform_orchestrator"])?,
-        ReleaseScope::All => regenerate_candid(&[
-            "platform_orchestrator",
-            "individual_user_template",
-        ])?,
+        ReleaseScope::All => {
+            regenerate_candid(&["platform_orchestrator", "individual_user_template"])?
+        }
     }
 
     let version = timestamp_version();
