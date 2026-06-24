@@ -4,14 +4,12 @@
 #
 # Usage:
 #   bash scripts/generate-candid.sh                  # regenerate all canisters
-#   bash scripts/generate-candid.sh user_index       # regenerate one canister
+#   bash scripts/generate-candid.sh user_info_service # regenerate one canister
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 ALL_CANISTERS=(
-  individual_user_template
-  platform_orchestrator
   user_post_service
   user_info_service
   rate_limits

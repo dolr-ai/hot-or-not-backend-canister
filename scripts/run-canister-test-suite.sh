@@ -14,8 +14,6 @@ cleanup() {
 trap cleanup EXIT
 
 for canister in \
-  individual_user_template \
-  platform_orchestrator \
   user_post_service \
   user_info_service \
   rate_limits
@@ -24,8 +22,6 @@ for canister in \
 done
 
 for canister in \
-  platform_orchestrator \
-  individual_user_template \
   user_post_service \
   user_info_service \
   rate_limits
