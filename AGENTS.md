@@ -88,8 +88,6 @@ For a complete local upgrade rehearsal (old tag → new code), the spirit of the
 3. Re-run the regular suite + the local PO setup test (and, if changing PO or harvest logic, the direct upgrade tests against a local PO if extended).
 4. Verify `get_version` (or the harvest methods) report the expected new version on a local PO instance.
 
-Also run `ic_repl_tests/all_tests.sh` (or equivalent) to create test users/posts and verify retention across upgrades where applicable.
-
 ## Mainnet Deployment
 
 **We are direct controllers of `platform_orchestrator`. PO upgrades no longer go through SNS proposals.**
