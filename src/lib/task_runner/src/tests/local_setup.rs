@@ -39,11 +39,12 @@ use ic_agent::Identity;
 use tokio::time::sleep;
 
 use crate::agent::{local_agent_from_pem, workspace_root};
+use crate::db::DB_PATH;
 
 /// DB SAFETY CONTRACT (critical):
 ///
 /// This test MUST NEVER write local canister IDs (or any data) into the
-/// production `ic_canisters.db` (the one under `src/lib/ic_canister_snapshot/`
+/// production `ic_canisters.db` (the one under `src/lib/task_runner/`
 /// that is used for real mainnet cycle harvesting and snapshot tracking).
 ///
 /// Why this is safe today:
@@ -100,8 +101,8 @@ async fn setup_local_po_and_validate_harvest_methods() -> Result<()> {
     // --- DB pollution guard (runtime assertion) ---
     // Record the mtime of the real production DB (if it exists) *before* we do anything.
     // At the end of the test we will assert it has not changed.
-    // The production DB lives under the ic_canister_snapshot crate.
-    let prod_db_path = root.join("src/lib/ic_canister_snapshot/ic_canisters.db");
+    // The production DB lives under the task_runner crate.
+    let prod_db_path = root.join(DB_PATH);
     let db_mtime_before = std::fs::metadata(&prod_db_path)
         .ok()
         .and_then(|m| m.modified().ok());

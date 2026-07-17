@@ -162,18 +162,18 @@ Verify after deployment:
 
 **Hard rule: only compile-time checked queries are permitted.**
 
-- Every interaction with SQLite (in `task_runner` and `ic_canister_snapshot`) **must** use the checked macros:
+- Every interaction with SQLite (in `task_runner`) **must** use the checked macros:
   - `sqlx::query!(...)` for statements that do not return rows (INSERT, UPDATE, DELETE, CREATE, PRAGMA, etc.)
   - `sqlx::query_scalar!(...)` for single-value SELECTs (COUNT(*), single columns, etc.)
   - `sqlx::query_as!(Type, ...)` (or the equivalent typed form) for row-to-struct mapping
 - **Never** use the runtime string forms: `sqlx::query("...")`, `query_scalar("...")`, `query_as::<_, T>("...")`, or any `.bind()` on a raw query string.
 - This rule applies to **all** statements, including initialisation PRAGMAs and `CREATE TABLE IF NOT EXISTS` / index DDL. There are no exceptions for "setup" or "infrastructure" queries.
 - **One narrow, documented exception for SQLite PRAGMA connection tuning only**:
-  - The two PRAGMA *assignment* statements executed at pool open time in `task_runner/src/db.rs:open_pool` and `ic_canister_snapshot/src/fetch.rs:open_and_init_db` (`journal_mode = WAL` and `synchronous = NORMAL`) are written with the raw runtime form `sqlx::query("PRAGMA ... = ...").execute(...)`.
+  - The two PRAGMA *assignment* statements executed at pool open time in `task_runner/src/db.rs:open_pool` (`journal_mode = WAL` and `synchronous = NORMAL`) are written with the raw runtime form `sqlx::query("PRAGMA ... = ...").execute(...)`.
   - Reason: SQLite's PRAGMA assignment syntax returns a row whose column is reported to the driver as untyped/NULL during sqlx macro expansion. No combination of `query!` / `query_scalar!` (plain or wrapped in `SELECT CAST(...)`) can be prepared against it without a syntax error or "no built-in mapping for NULL".
   - Immediately after each setter we issue the corresponding *getter* (`PRAGMA journal_mode`, `PRAGMA synchronous`) using the checked `query_scalar!` macro; those are clean typed columns and are recorded in `.sqlx/`.
-  - Every other statement in the two crates — every CREATE TABLE / INDEX, every INSERT / UPDATE / SELECT / COUNT used by decommission tracking, cycle harvest (po_* tables, pending_harvests, mark_harvested, etc.), snapshot population, checkpoints, and progress — **must** be written with the checked `!` macros. The exception is strictly limited to these two initialisation lines.
-- Rationale: type safety at compile time, prevention of schema drift, consistent behaviour across the two crates that share the `ic_canisters.db` file, and elimination of runtime SQL surprises. "No shortcuts. We only do queries that are type checked."
+- Every other statement in the crate — every CREATE TABLE / INDEX, every INSERT / UPDATE / SELECT / COUNT used by decommission tracking, cycle harvest (po_* tables, pending_harvests, mark_harvested, etc.), checkpoints, and progress — **must** be written with the checked `!` macros. The exception is strictly limited to these two initialisation lines.
+- Rationale: type safety at compile time, prevention of schema drift, and elimination of runtime SQL surprises. "No shortcuts. We only do queries that are type checked."
 
 **Destructive operations and schema changes — strict prohibition**
 
@@ -192,9 +192,8 @@ Verify after deployment:
 
 1. Write the new/changed query using the `!` macro form.
 2. If the query references a table/column that does not yet exist in the on-disk DB used for prepare, first ensure the schema is present **using only additive, non-destructive commands**:
-   - For task_runner tables (decommissioned, cycle_harvested, release_counter, etc.): run the ignored bootstrap test:
+   - For task_runner tables (decommissioned, cycle_harvested, release_counter, po_controlled_canisters, etc.): run the ignored bootstrap test:
      `cargo test -p task_runner -- --ignored bootstrap_schema --nocapture`
-   - For snapshot tables (canisters, controllers, progress): run the corresponding ignored populate test.
    - For the `po_controlled_canisters` source list (the authoritative list of PO-controlled individual user canisters for harvesting): it is now treated as static/manual data in the DB (populated once externally). Maintain it with direct additive SQL (INSERT OR IGNORE / DELETE specific rows) or future dedicated task_runner entry points. Use only additive commands:
      ```
      sqlite3 ic_canisters.db "CREATE TABLE IF NOT EXISTS po_controlled_canisters (principal TEXT PRIMARY KEY);"

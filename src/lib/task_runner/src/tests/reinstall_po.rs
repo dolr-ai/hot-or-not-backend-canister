@@ -2,7 +2,7 @@ use candid::{Encode, Principal};
 
 use crate::{
     agent::{agent_from_pem, workspace_root},
-    db::{next_release_version, open_pool},
+    db::{next_release_version, open_pool, DB_PATH},
     sns_types::{
         Action, Command, ManageNeuron, Proposal, UpgradeSnsControlledCanister, NEURON_SUBACCOUNT,
         PLATFORM_ORCHESTRATOR_ID, SNS_GOVERNANCE_ID,
@@ -19,7 +19,7 @@ use crate::{
 async fn reinstall_po() {
     let root = workspace_root();
     let wasm_path = root.join(".dfx/ic/canisters/platform_orchestrator/platform_orchestrator.wasm.gz");
-    let db_path = root.join("src/lib/ic_canister_snapshot/ic_canisters.db");
+    let db_path = root.join(DB_PATH);
     let pem_path = root.join("actions_identity.pem");
 
     // Always build the latest wasm before submitting.

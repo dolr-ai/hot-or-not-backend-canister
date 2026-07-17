@@ -9,7 +9,6 @@ members = [
     "src/lib/shared_utils",
     "src/lib/test_utils",
     "src/canister/rate_limits",
-    "src/lib/ic_canister_snapshot",
     "src/lib/task_runner",
 ]
 

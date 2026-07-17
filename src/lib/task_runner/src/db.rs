@@ -2,7 +2,7 @@ use anyhow::Result;
 use candid::Principal;
 use sqlx::SqlitePool;
 
-pub const DB_PATH: &str = "src/lib/ic_canister_snapshot/ic_canisters.db";
+pub const DB_PATH: &str = "src/lib/task_runner/ic_canisters.db";
 
 pub async fn open_pool(db_path: &str) -> Result<SqlitePool> {
     let pool = SqlitePool::connect(&format!("sqlite:{db_path}?mode=rwc")).await?;
