@@ -33,22 +33,23 @@ The `task_runner` tests are the single source of truth for these operations. The
 
 ### Utility scripts (still under `scripts/`)
 
-These are retained for supporting tasks (Candid, deps, snapshots). They are **not** the deployment/upgrade path.
+These are retained for supporting tasks (Candid, snapshots). They are **not** the deployment/upgrade path.
 
 | Script | Purpose |
-|--------|---------|
-| `scripts/install-dependencies.sh` | Install dfx, pocket-ic, and candid-extractor (idempotent) |
-| `scripts/run-canister-test-suite.sh` | Full (non-ignored) test suite |
-| `scripts/generate-candid.sh` | Rebuild wasm(s) and regenerate `can.did` (still invoked from some task_runner paths) |
+|--------|--------|
+| `scripts/generate-candid.sh` | Rebuild wasm(s) and regenerate `can.did` (still invoked from task_runner tests via `Command::new("bash")`) — must remain as a file |
 | `scripts/canister_snapshot.sh` | Canister snapshot operations (take / list / load) |
+
+**Note:** `install-dependencies.sh` and `run-canister-test-suite.sh` have been inlined into mise.toml tasks (`canister-bootstrap`, `canister-test`). Use `mise run canister-bootstrap` and `mise run canister-test` from the repo root instead.
 
 Other scripts (`release-and-submit-proposals.sh`, `deploy-local.sh`, `upgrade_ic_repl.sh`, etc.) are legacy for PO lifecycle and should not be used for new deployments or upgrades. They are kept in-tree only for reference / audit.
 
 ### Running the test suite
 
+From the repo root:
 ```sh
-bash scripts/install-dependencies.sh
-bash scripts/run-canister-test-suite.sh
+mise run canister-bootstrap   # install dfx, pocket-ic, candid-extractor
+mise run canister-test          # run full (non-ignored) test suite
 ```
 
 ### Snapshot operations
@@ -79,7 +80,7 @@ This replaces the old `bash scripts/deploy-local.sh` flow (which called removed 
 
 For full non-ignored unit/integration tests (the regular suite):
 ```sh
-bash scripts/run-canister-test-suite.sh
+mise run canister-test
 ```
 
 For a complete local upgrade rehearsal (old tag → new code), the spirit of the old checklist still applies:

@@ -5,6 +5,10 @@
 # Usage:
 #   bash scripts/generate-candid.sh                  # regenerate all canisters
 #   bash scripts/generate-candid.sh user_info_service # regenerate one canister
+#
+# NOTE: This script is also invoked directly by Rust integration tests
+# (task_runner tests) via Command::new("bash").args(["scripts/generate-candid.sh", ...]).
+# It must remain as a file — do not inline into mise.toml only.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
