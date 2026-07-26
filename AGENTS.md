@@ -37,7 +37,7 @@ These are retained for supporting tasks (Candid, snapshots). They are **not** th
 
 | Script | Purpose |
 |--------|--------|
-| `scripts/generate-candid.sh` | Rebuild wasm(s) and regenerate `can.did` (still invoked from task_runner tests via `Command::new("bash")`) — must remain as a file |
+| `scripts/generate-candid.sh` | Rebuild wasm(s) and regenerate `can.did` (still invoked from task_runner tests via `Command::new("bash")`) — must remain as a file. Also wrapped as `mise run canister-generate-candid` from the repo root. |
 | `scripts/canister_snapshot.sh` | Canister snapshot operations (take / list / load) |
 
 **Note:** `install-dependencies.sh` and `run-canister-test-suite.sh` have been inlined into mise.toml tasks (`canister-bootstrap`, `canister-test`). Use `mise run canister-bootstrap` and `mise run canister-test` from the repo root instead.
