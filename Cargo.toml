@@ -3,6 +3,7 @@ resolver = "2"
 
 members = [
     "src/canister/platform_orchestrator",
+    "src/canister/canister_to_harvest",
     "src/canister/user_info_service",
     "src/canister/user_post_service",
     "src/lib/integration_tests",

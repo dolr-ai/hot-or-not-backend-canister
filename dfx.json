@@ -59,6 +59,17 @@
       "optimize": "size",
       "package": "platform_orchestrator",
       "type": "rust"
+    },
+    "canister_to_harvest": {
+      "candid": "./src/canister/canister_to_harvest/can.did",
+      "declaration": {
+        "node_compatibility": true,
+        "output": "./export/declarations/canister_to_harvest"
+      },
+      "gzip": true,
+      "optimize": "size",
+      "package": "canister_to_harvest",
+      "type": "rust"
     }
   },
   "version": 1

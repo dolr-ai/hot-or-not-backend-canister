@@ -1,5 +1,8 @@
-/// Cycle harvesting via task_runner — processes po_controlled_canisters one-by-one,
-/// reclaiming reserved cycles and transferring them back to platform_orchestrator.
+/// Cycle harvesting via task_runner — reclaims cycles from a single PO-controlled
+/// canister and transfers them back to platform_orchestrator.
+///
+/// Only single-canister harvesting is supported. The canister list lives in
+/// `src/canister/platform_orchestrator/principal.csv` (one principal per line).
 ///
 /// Flow per canister:
 ///   1. Get pre-state (balance, reserved, status, has_wasm)
@@ -8,33 +11,18 @@
 ///      and assert the actions principal is now in the returned controllers list
 ///      (explicit post-Ok check, no polling loop).
 ///   3. Uninstall wasm (if installed) → releases reserved cycles to main balance
-///   4. Check post-uninstall balance; top up with 0.5T if < 500M
+///   4. Check post-uninstall balance; top up with 0.5T if < 1.0 TC
 ///   5. Install individual_user_template wasm
 ///   6. Call return_cycle_balance_to_platform_orchestrator → sends everything back
 ///   7. Final uninstall
 ///   8. Set controllers to [PO] only via management canister
 ///   9. Validate final state
-///  10. Mark harvested in SQLite DB
 ///
-/// Resumable: re-running skips already-harvested canisters (cycle_harvested table).
+/// Run:
+///   HARVEST_CANISTER_ID=z7bpd-waaaa-aaaag-acogq-cai \
+///     cargo test -p task_runner -- --ignored harvest_single_canister --nocapture
 ///
-/// Local setup (required before running harvest tests against a *local* replica):
-///   cargo test -p task_runner -- --ignored setup_local_po_and_validate_harvest_methods --nocapture
-/// This starts a clean dfx replica, deploys the *current* platform_orchestrator (post-cleanup),
-/// creates a controllable test target, adds the necessary controllers, and verifies that
-/// the PO exposes `add_our_identity_as_controller`, `get_controllers_and_cycle_balance`,
-/// `get_version`, etc. (i.e. no "Canister has no update method" errors).
-///
-/// The old `scripts/deploy-local.sh` (and raw calls to `upload_wasms` inside it) are
-/// obsolete after the PO was stripped to the harvest surface; they will hit exactly the
-/// error: "Canister has no update method 'upload_wasms'".
-///
-/// Run harvest tests with:
-///   cargo test -p task_runner -- --ignored harvest_single_canister --nocapture
-///   cargo test -p task_runner -- --ignored harvest_cycles_batch --nocapture
-///
-/// For harvest_single_canister you can also force an exact ID via env var (see
-/// the function for the exact command).
+/// If HARVEST_CANISTER_ID is not set, the first canister from principal.csv is used.
 use anyhow::{Context, Result};
 use candid::{encode_args, Encode, Principal};
 use ic_agent::Identity;
@@ -68,12 +56,14 @@ const TOP_UP_AMOUNT: u128 = 500_000_000_000; // 0.5T
 /// query status and set controllers. We recover it during the harvest itself.
 const PRE_HARVEST_DEPOSIT: u128 = 100_000_000_000; // 100B cycles (~0.1 TC)
 
-/// Path to the individual_user_template wasm (built for mainnet).
-const INDIVIDUAL_USER_WASM_PATH: &str =
-    ".dfx/ic/canisters/individual_user_template/individual_user_template.wasm.gz";
+/// Path to the canister_to_harvest wasm (built by cargo for wasm32).
+/// This minimal canister is installed on the target during harvest so it can
+/// call return_cycle_balance_to_platform_orchestrator to send cycles back to the PO.
+/// Built by `cargo build --target wasm32-unknown-unknown --release` (via generate-candid.sh).
+const HARVEST_WASM_PATH: &str =
+    "target/wasm32-unknown-unknown/release/canister_to_harvest.wasm";
 
 /// Canisters that must NEVER be harvested — active production services.
-/// These are excluded from all harvest flows regardless of DB state.
 const HARVEST_BLOCKLIST: &[&str] = &[
     "ivkka-7qaaa-aaaas-qbg3q-cai",  // user_info_service
     "gxhc3-pqaaa-aaaas-qbh3q-cai",  // user_post_service
@@ -235,11 +225,11 @@ async fn harvest_canister(
 
             if is_controller_only_error(&estr) {
                 println!(
-	                    "  \u{26a0} early canister_status rejected with 'only controllers' error \
-	                     (PO is the sole controller from a prior harvest). Calling platform_orchestrator \
-	                     add_our_identity_as_controller to grant ourselves co-controller rights, then \
-	                     retrying the management canister_status..."
-	                );
+                    "  \u{26a0} early canister_status rejected with 'only controllers' error \
+                     (PO is the sole controller from a prior harvest). Calling platform_orchestrator \
+                     add_our_identity_as_controller to grant ourselves co-controller rights, then \
+                     retrying the management canister_status..."
+                );
                 let add_ctrl_arg = encode_args((canister_id,))?;
                 agent
                     .update(&po, "add_our_identity_as_controller")
@@ -251,7 +241,7 @@ async fn harvest_canister(
                     })?;
                 println!(
                     "  \u{2713} recovery add_our_identity_as_controller succeeded; \
-	                     re-issuing early canister_status (now as co-controller)"
+                     re-issuing early canister_status (now as co-controller)"
                 );
 
                 // Retry the exact same direct management call that just failed.
@@ -332,16 +322,15 @@ async fn harvest_canister(
         .call_and_wait()
         .await
         .map_err(|e| anyhow::anyhow!("add_our_identity_as_controller failed: {}", e))?;
-    println!("  ✓ actions_identity added as controller");
+    println!("  \u{2713} actions_identity added as controller");
     // Immediately after the add_our update call returns Ok, try to re-query the management
     // canister directly using the actions-signed agent and assert the actions principal
     // is now present.
     //
-    // We are tolerant of "canister_not_found" here: the historical po_controlled_canisters
-    // list contains many canisters that have since been deleted (uninstalled, decommissioned,
-    // or self-removed). If the canister disappeared between the PO add and this verify,
-    // we log and continue — later direct calls (uninstall etc.) will surface the same error,
-    // and the batch will record it as a harvest failure (so it is excluded from future pending).
+    // We are tolerant of "canister_not_found" here: the principal.csv list may contain
+    // canisters that have since been deleted (uninstalled, decommissioned, or self-removed).
+    // If the canister disappeared between the PO add and this verify, we log and continue —
+    // later direct calls (uninstall etc.) will surface the same error.
     // The explicit assert (no polling) is preserved for the happy path where the canister
     // still exists.
     let verify_record = CanisterIdRecord { canister_id };
@@ -476,7 +465,7 @@ async fn harvest_canister(
             Err(e) => {
                 // If uninstall fails, the canister may have no wasm — proceed to install.
                 println!(
-                    "  \u{26A0} uninstall_code failed (canister may have no wasm): {}",
+                    "  \u{26a0} uninstall_code failed (canister may have no wasm): {}",
                     e
                 );
             }
@@ -516,9 +505,9 @@ async fn harvest_canister(
             }
             Err(e) => {
                 println!(
-	                    "  \u{26A0} post-uninstall canister_status probe failed (may be ok if canister is being drained): {}",
-	                    e
-	                );
+                    "  \u{26a0} post-uninstall canister_status probe failed (may be ok if canister is being drained): {}",
+                    e
+                );
             }
         }
     }
@@ -645,12 +634,12 @@ async fn harvest_canister(
         "absent".to_string()
     };
     println!(
-    	    "  post_install_balance: {} TC, post_install_reserved: {} TC, status: {:?}, module_hash: {}",
-    	    format_cycles(post_install_balance),
-    	    format_cycles(post_install_reserved),
-    	    post_install_status.status,
-    	    post_mod
-    	);
+        "  post_install_balance: {} TC, post_install_reserved: {} TC, status: {:?}, module_hash: {}",
+        format_cycles(post_install_balance),
+        format_cycles(post_install_reserved),
+        post_install_status.status,
+        post_mod
+    );
 
     // Ensure the canister is running before attempting the transfer. If the canister
     // is Stopped, `return_cycle_balance_to_platform_orchestrator` will fail with IC0508
@@ -669,7 +658,7 @@ async fn harvest_canister(
             .call_and_wait()
             .await
             .map_err(|e| anyhow::anyhow!("start_canister failed: {}", e))?;
-        println!("  ✓ canister started");
+        println!("  \u{2713} canister started");
     }
 
     // Step 6: Transfer cycles to PO, passing an explicit reserve (cycles to leave behind).
@@ -723,10 +712,10 @@ async fn harvest_canister(
                 let is_ooce = is_out_of_cycles_error(&estr);
                 if is_ooce {
                     println!(
-    	                    "  \u{26A0} return_cycle_balance call failed (out of cycles) with reserve {}B: {}",
-    	                    reserve / 1_000_000_000,
-    	                    e
-    	                );
+                        "  \u{26A0} return_cycle_balance call failed (out of cycles) with reserve {}B: {}",
+                        reserve / 1_000_000_000,
+                        e
+                    );
                     (false, 0, true)
                 } else {
                     println!("  \u{26A0} return_cycle_balance call failed: {}", e);
@@ -753,13 +742,11 @@ async fn harvest_canister(
         reserve += 10_000_000_000;
         if reserve > max_reserve {
             println!(
-    	            "  \u{26A0} exhausted reserve retries up to 100B; 0 transferred (will proceed to uninstall/lockdown)"
-    	        );
+                "  \u{26A0} exhausted reserve retries up to 100B; 0 transferred (will proceed to uninstall/lockdown)"
+            );
             break;
         }
     }
-
-    // (no extra print here; success path already logged the ✓ above)
 
     // Step 7: Final uninstall.
     let uninstall_arg = encode_args((CanisterIdRecord { canister_id },))?;
@@ -773,7 +760,7 @@ async fn harvest_canister(
         .call_and_wait()
         .await
         .map_err(|e| anyhow::anyhow!("final uninstall_code failed: {}", e))?;
-    println!("  ✓ final uninstall done");
+    println!("  \u{2713} final uninstall done");
 
     // Step 8: Set controllers to [PO] only via management canister.
     let po_principal = Principal::from_text(PLATFORM_ORCHESTRATOR_ID).unwrap();
@@ -795,7 +782,7 @@ async fn harvest_canister(
         .call_and_wait()
         .await
         .map_err(|e| anyhow::anyhow!("update_settings failed: {}", e))?;
-    println!("  ✓ controllers set to [PO] only");
+    println!("  \u{2713} controllers set to [PO] only");
 
     // Step 9: Validate final state.
     let status_arg = encode_args((canister_id,))?;
@@ -814,15 +801,15 @@ async fn harvest_canister(
     if details.controllers.len() != 1 || details.controllers[0] != po {
         anyhow::bail!(
             "controllers not set to [PO] only after update_settings: {:?}. \
-             The canister was NOT fully harvested — do not record as success.",
+             The canister was NOT fully harvested.",
             details.controllers
         );
     } else {
-        println!("  ✓ validated: controllers = [PO]");
+        println!("  \u{2713} validated: controllers = [PO]");
     }
 
     println!(
-        "  ✓ final balance: {} TC",
+        "  \u{2713} final balance: {} TC",
         format_cycles(details.cycle_balance)
     );
 
@@ -889,14 +876,15 @@ enum CanisterRunningStatus {
     Stopped,
 }
 
-// ── Test entry points ────────────────────────────────────────────────────────
+// ── Test entry point ──────────────────────────────────────────────────────────
 
-/// Harvest cycles from a single canister (first pending one).
-/// Useful for validating the flow before running batches.
+/// Harvest cycles from a single canister.
 ///
-/// To target a *specific* canister ID (instead of the next one from the DB query):
+/// To target a specific canister ID:
 ///   HARVEST_CANISTER_ID=z7bpd-waaaa-aaaag-acogq-cai \
 ///     cargo test -p task_runner -- --ignored harvest_single_canister --nocapture
+///
+/// If HARVEST_CANISTER_ID is not set, the first canister from principal.csv is used.
 #[tokio::test]
 #[ignore = "harvests cycles on mainnet — run explicitly"]
 async fn harvest_single_canister() -> Result<()> {
@@ -921,40 +909,27 @@ async fn harvest_single_canister() -> Result<()> {
 
     // Hard blocklist: never harvest active production services
     if is_harvest_blocked(canister_id) {
-        println!("  ⚠ BLOCKED: {} is on the harvest blocklist, skipping.", canister_id);
+        println!("  \u{26a0} BLOCKED: {} is on the harvest blocklist, skipping.", canister_id);
         return Ok(());
     }
 
-    // Build individual_user_template wasm and auto-regenerate its Candid interface
+    // Build canister_to_harvest wasm and auto-regenerate its Candid interface
     // (so the .did is always produced from the exact compiled export_candid!() in this build).
-    // We invoke the project's generate-candid.sh instead of raw `dfx build` so the
-    // checked-in can.did for individual_user_template stays in sync automatically.
-    // Then run `dfx build` to produce the fresh .wasm.gz in .dfx/ic/canisters/.
-    println!("Building individual_user_template + regenerating Candid via generate-candid.sh...");
+    // generate-candid.sh runs `cargo build --target wasm32-unknown-unknown --release` internally,
+    // producing the wasm at target/wasm32-unknown-unknown/release/canister_to_harvest.wasm.
+    println!("Building canister_to_harvest + regenerating Candid via generate-candid.sh...");
     let build_status = std::process::Command::new("bash")
         .env("DFX_WARNING", "-mainnet_plaintext_identity")
-        .args(["scripts/generate-candid.sh", "individual_user_template"])
+        .args(["scripts/generate-candid.sh", "canister_to_harvest"])
         .current_dir(&root)
         .status()
         .context("bash or scripts/generate-candid.sh not found")?;
     anyhow::ensure!(
         build_status.success(),
-        "scripts/generate-candid.sh individual_user_template failed"
+        "scripts/generate-candid.sh canister_to_harvest failed"
     );
 
-    // dfx build to produce the fresh .wasm.gz in .dfx/ic/canisters/
-    let dfx_status = std::process::Command::new("dfx")
-        .env("DFX_WARNING", "-mainnet_plaintext_identity")
-        .args(["build", "--network=ic", "individual_user_template"])
-        .current_dir(&root)
-        .status()
-        .context("dfx build individual_user_template not found")?;
-    anyhow::ensure!(
-        dfx_status.success(),
-        "dfx build individual_user_template failed"
-    );
-
-    let wasm_path = root.join(INDIVIDUAL_USER_WASM_PATH);
+    let wasm_path = root.join(HARVEST_WASM_PATH);
     let wasm_blob = std::fs::read(&wasm_path)
         .with_context(|| format!("wasm not found at {}", wasm_path.display()))?;
     println!("  wasm size: {} bytes", wasm_blob.len());
@@ -989,14 +964,21 @@ async fn harvest_single_canister() -> Result<()> {
         canister_id
     );
     if let Err(e) = ensure_canister_has_cycles(&agent, po, canister_id).await {
-        println!("  ⚠ pre-harvest deposit failed (continuing anyway): {}", e);
+        println!("  \u{26a0} pre-harvest deposit failed (continuing anyway): {}", e);
     } else {
-        println!("  ✓ pre-harvest deposit done");
+        println!("  \u{2713} pre-harvest deposit done");
     }
+
+    print_po_cycle_balance("before harvest", &root);
 
     match harvest_canister(&agent, actions_principal, po, canister_id, &wasm_blob).await {
         Ok((_pre_balance, _pre_reserved, _post_uninstall, transferred, topped_up)) => {
-            println!("\n✓ Harvest complete for {} (transferred {} TC{})", canister_id, format_cycles(transferred), if topped_up > 0 { " (topped up)" } else { "" });
+            println!(
+                "\n\u{2713} Harvest complete for {} (transferred {} TC{})",
+                canister_id,
+                format_cycles(transferred),
+                if topped_up > 0 { " (topped up)" } else { "" }
+            );
         }
         Err(e) => {
             let reason = e.to_string();
@@ -1005,7 +987,7 @@ async fn harvest_single_canister() -> Result<()> {
             // try parent recovery as a fallback (additive, non-destructive).
             if is_controller_ownership_error(&reason) {
                 println!(
-                    "\n⚠ Normal harvest failed with controller error, \
+                    "\n\u{26a0} Normal harvest failed with controller error, \
                      attempting parent recovery for {}...",
                     canister_id
                 );
@@ -1022,613 +1004,32 @@ async fn harvest_single_canister() -> Result<()> {
                 {
                     Ok(transferred) => {
                         println!(
-                            "\n✓ Harvest complete for {} via parent recovery, transferred {} TC",
+                            "\n\u{2713} Harvest complete for {} via parent recovery, transferred {} TC",
                             canister_id,
                             format_cycles(transferred)
                         );
                     }
                     Err(parent_err) => {
-                        let parent_reason = parent_err.to_string();
                         println!(
-                            "\n✗ Parent recovery also failed for {}: {}",
-                            canister_id, parent_reason
+                            "\n\u{2717} Parent recovery also failed for {}: {}",
+                            canister_id,
+                            parent_err
                         );
                     }
                 }
             } else {
-                println!("\n✗ Harvest failed for {}: {}", canister_id, reason);
+                println!("\n\u{2717} Harvest failed for {}: {}", canister_id, reason);
             }
         }
     }
+
+    print_po_cycle_balance("after harvest", &root);
 
     Ok(())
 }
 
-/// Harvest cycles from a batch of canisters (BATCH_SIZE at a time).
-/// Resumable: skips already-harvested canisters.
-#[tokio::test]
-#[ignore = "harvests cycles on mainnet — run explicitly"]
-async fn harvest_cycles_batch() -> Result<()> {
-    let root = workspace_root();
-    let pem_path = root.join("actions_identity.pem");
+// ── Parent recovery fallback ──────────────────────────────────────────────────
 
-    let csv_path = root.join(PRINCIPAL_CSV);
-    let all_canisters = read_po_controlled_canisters(&csv_path)?;
-    if all_canisters.is_empty() {
-        println!("No canisters found in {}.", csv_path.display());
-        return Ok(());
-    }
-
-    println!(
-        "Processing {} canisters from {} with up to 128 in flight...",
-        all_canisters.len(),
-        csv_path.display()
-    );
-
-    // Build individual_user_template wasm once + auto-regenerate its Candid interface
-    // via the project's generate-candid.sh (ensures .did is produced from this exact build's export_candid!()).
-    println!("\nBuilding individual_user_template + regenerating Candid via generate-candid.sh...");
-    let status = std::process::Command::new("bash")
-        .env("DFX_WARNING", "-mainnet_plaintext_identity")
-        .args(["scripts/generate-candid.sh", "individual_user_template"])
-        .current_dir(&root)
-        .status()
-        .context("bash or scripts/generate-candid.sh not found")?;
-    anyhow::ensure!(
-        status.success(),
-        "scripts/generate-candid.sh individual_user_template failed"
-    );
-
-    // dfx build to produce the fresh .wasm.gz in .dfx/ic/canisters/
-    let dfx_status = std::process::Command::new("dfx")
-        .env("DFX_WARNING", "-mainnet_plaintext_identity")
-        .args(["build", "--network=ic", "individual_user_template"])
-        .current_dir(&root)
-        .status()
-        .context("dfx build not found")?;
-    anyhow::ensure!(
-        dfx_status.success(),
-        "dfx build individual_user_template failed"
-    );
-
-    let wasm_path = root.join(INDIVIDUAL_USER_WASM_PATH);
-    let wasm_blob = std::fs::read(&wasm_path)
-        .with_context(|| format!("wasm not found at {}", wasm_path.display()))?;
-    println!("  wasm size: {} bytes", wasm_blob.len());
-
-    let agent = Arc::new(agent_from_pem(&pem_path).await?);
-    let po = Principal::from_text(PLATFORM_ORCHESTRATOR_ID)?;
-
-    // Derive the actions principal once for the batch (same identity for all canisters).
-    // Passed into harvest_canister so the post-add_our Ok assertion can verify the
-    // PO reports the principal in the controllers list before direct mgmt calls.
-    let actions_identity = ic_agent::identity::Secp256k1Identity::from_pem_file(&pem_path)
-        .with_context(|| {
-            format!(
-                "failed to load Secp256k1Identity from {}",
-                pem_path.display()
-            )
-        })?;
-    let actions_principal = actions_identity.sender().map_err(|e| {
-        anyhow::anyhow!(
-            "could not derive sender principal from actions_identity.pem: {}",
-            e
-        )
-    })?;
-
-    // Wrap for sharing across concurrent tasks.
-    let wasm_blob = Arc::new(wasm_blob);
-
-    // Snapshot PO balance before any harvest transfers this batch.
-    print_po_cycle_balance("before batch harvest", &root);
-
-    let semaphore = Arc::new(Semaphore::new(16));
-    let stats = Arc::new(tokio::sync::Mutex::new(BatchStats::default()));
-    let mut join_set: JoinSet<HarvestOutcome> = JoinSet::new();
-
-    for canister_id in all_canisters {
-        // Hard blocklist: never harvest active production services
-        if is_harvest_blocked(canister_id) {
-            println!("  ⚠ [{}] BLOCKED: on harvest blocklist, skipping.", canister_id);
-            continue;
-        }
-
-        let sem = semaphore.clone();
-        let ag = agent.clone();
-        let wsm = wasm_blob.clone();
-        let act = actions_principal.clone();
-        let p = po.clone();
-        let st = stats.clone();
-        let root = root.to_path_buf();
-
-        join_set.spawn(async move {
-            let _permit = sem.acquire().await.expect("semaphore permit");
-
-            // Pre-harvest: deposit cycles to ensure out-of-cycles canisters
-            // can be reached and controller principals are set consistently.
-            if let Err(e) = ensure_canister_has_cycles(&ag, p, canister_id).await {
-                println!("  ⚠ [{}] pre-harvest deposit failed: {}", canister_id, e);
-            }
-
-            match harvest_canister(&ag, act, p, canister_id, &wsm).await {
-                Ok((_pre_balance, _pre_reserved, _post_uninstall, transferred, topped_up)) => {
-                    {
-                        let mut g = st.lock().await;
-                        g.success += 1;
-                        g.transferred += transferred;
-                    }
-
-                    println!(
-                        "  \u{2713} [{}] harvested, transferred {} TC{}",
-                        canister_id,
-                        format_cycles(transferred),
-                        if topped_up > 0 { " (topped up)" } else { "" }
-                    );
-
-                    HarvestOutcome {
-                        succeeded: true,
-                        transferred,
-                    }
-                }
-                Err(e) => {
-                    let reason = e.to_string();
-
-                    // If the failure looks like a controller/ownership error,
-                    // try parent recovery as a fallback (additive, non-destructive).
-                    if is_controller_ownership_error(&reason) {
-                        println!(
-                            "  \u{26a0} [{}] normal harvest failed with controller error, \
-                             attempting parent recovery...",
-                            canister_id
-                        );
-
-                        match harvest_with_parent_recovery(
-                            &ag,
-                            act,
-                            p,
-                            canister_id,
-                            &wsm,
-                            &root,
-                        )
-                        .await
-                        {
-                            Ok(transferred) => {
-                                {
-                                    let mut g = st.lock().await;
-                                    g.success += 1;
-                                    g.transferred += transferred;
-                                }
-
-                                println!(
-                                    "  \u{2713} [{}] harvested via parent recovery, \
-                                     transferred {} TC",
-                                    canister_id,
-                                    format_cycles(transferred)
-                                );
-
-                                HarvestOutcome {
-                                    succeeded: true,
-                                    transferred,
-                                }
-                            }
-                            Err(parent_err) => {
-                                let parent_reason = parent_err.to_string();
-
-                                {
-                                    let mut g = st.lock().await;
-                                    g.failed += 1;
-                                }
-
-                                println!(
-                                    "  \u{2717} [{}] parent recovery also failed: {}",
-                                    canister_id, parent_reason
-                                );
-
-                                HarvestOutcome {
-                                    succeeded: false,
-                                    transferred: 0,
-                                }
-                            }
-                        }
-                    } else {
-                        {
-                            let mut g = st.lock().await;
-                            g.failed += 1;
-                        }
-
-                        println!("  \u{2717} [{}] failed: {}", canister_id, reason);
-
-                        HarvestOutcome {
-                            succeeded: false,
-                            transferred: 0,
-                        }
-                    }
-                }
-            }
-        });
-
-        // Throttle: when the semaphore is full, wait for a task to complete.
-        if join_set.len() >= 16 {
-            if let Some(res) = join_set.join_next().await {
-                if let Err(e) = res {
-                    println!("  \u{2717} harvest task panicked: {}", e);
-                }
-            }
-        }
-    }
-
-    // Drain remaining tasks.
-    while !join_set.is_empty() {
-        if let Some(res) = join_set.join_next().await {
-            if let Err(e) = res {
-                println!("  \u{2717} harvest task panicked: {}", e);
-            }
-        }
-    }
-
-    let final_stats = stats.lock().await;
-
-    // Summary.
-    println!("\n========== Batch Summary ==========");
-    println!("  Harvested this batch: {}", final_stats.success);
-    println!("  Failed this batch: {}", final_stats.failed);
-    println!(
-        "  Total transferred this batch: {} TC",
-        format_cycles(final_stats.transferred)
-    );
-
-    // Snapshot PO balance after the batch to see if the harvest deposits
-    // actually increased its cycle balance.
-    print_po_cycle_balance("after batch harvest", &root);
-
-    Ok(())
-}
-
-/// Re-harvest all canisters from the principal.csv list.
-///
-/// Without a tracking DB there is no "failed" vs "harvested" distinction —
-/// this simply re-runs the harvest over the full list (or the first N if
-/// `HARVEST_CANISTER_LIMIT` is set). Use it to retry canisters that failed
-/// in a previous `harvest_cycles_batch` run.
-///
-/// Usage (process every canister):
-///   cargo test -p task_runner -- --ignored harvest_failed_canisters --nocapture
-///
-/// Usage (only the first 10 for a trial run):
-///   HARVEST_CANISTER_LIMIT=10 \
-///     cargo test -p task_runner -- --ignored harvest_failed_canisters --nocapture
-#[tokio::test]
-#[ignore = "re-harvests canisters from principal.csv on mainnet — run explicitly"]
-async fn harvest_failed_canisters() -> Result<()> {
-    let root = workspace_root();
-    let pem_path = root.join("actions_identity.pem");
-
-    let csv_path = root.join(PRINCIPAL_CSV);
-    let mut canisters = read_po_controlled_canisters(&csv_path)?;
-    if let Ok(limit_str) = std::env::var("HARVEST_CANISTER_LIMIT") {
-        if let Ok(limit) = limit_str.parse::<usize>() {
-            canisters.truncate(limit);
-        }
-    }
-    if canisters.is_empty() {
-        println!("No canisters found in {}.", csv_path.display());
-        return Ok(());
-    }
-
-    println!("Re-harvesting {} canisters from {}...", canisters.len(), csv_path.display());
-
-    // Build wasm + candid (same as other harvest entry points — with dfx build)
-    println!("\nBuilding individual_user_template + regenerating Candid via generate-candid.sh...");
-    let build_status = std::process::Command::new("bash")
-        .env("DFX_WARNING", "-mainnet_plaintext_identity")
-        .args(["scripts/generate-candid.sh", "individual_user_template"])
-        .current_dir(&root)
-        .status()
-        .context("bash or scripts/generate-candid.sh not found")?;
-    anyhow::ensure!(
-        build_status.success(),
-        "scripts/generate-candid.sh individual_user_template failed"
-    );
-
-    let wasm_path = root.join(INDIVIDUAL_USER_WASM_PATH);
-    let wasm_blob = std::fs::read(&wasm_path)
-        .with_context(|| format!("wasm not found at {}", wasm_path.display()))?;
-    println!("  wasm size: {} bytes", wasm_blob.len());
-
-    let agent = Arc::new(agent_from_pem(&pem_path).await?);
-    let po = Principal::from_text(PLATFORM_ORCHESTRATOR_ID)?;
-
-    let actions_identity = ic_agent::identity::Secp256k1Identity::from_pem_file(&pem_path)
-        .with_context(|| {
-            format!(
-                "failed to load Secp256k1Identity from {}",
-                pem_path.display()
-            )
-        })?;
-    let actions_principal = actions_identity.sender().map_err(|e| {
-        anyhow::anyhow!(
-            "could not derive sender principal from actions_identity.pem: {}",
-            e
-        )
-    })?;
-
-    let wasm_blob = Arc::new(wasm_blob);
-
-    print_po_cycle_balance("before re-harvest", &root);
-
-    let semaphore = Arc::new(Semaphore::new(4));
-    let stats = Arc::new(tokio::sync::Mutex::new(BatchStats::default()));
-    let mut join_set: JoinSet<HarvestOutcome> = JoinSet::new();
-
-    for canister_id in canisters {
-        if is_harvest_blocked(canister_id) {
-            println!("  ⚠ [{}] BLOCKED: on harvest blocklist, skipping.", canister_id);
-            continue;
-        }
-
-        let sem = semaphore.clone();
-        let ag = agent.clone();
-        let wsm = wasm_blob.clone();
-        let act = actions_principal.clone();
-        let p = po.clone();
-        let st = stats.clone();
-
-        join_set.spawn(async move {
-            let _permit = sem.acquire().await.expect("semaphore permit");
-
-            match harvest_canister(&ag, act, p, canister_id, &wsm).await {
-                Ok((_pre_balance, _pre_reserved, _post_uninstall, transferred, topped_up)) => {
-                    {
-                        let mut g = st.lock().await;
-                        g.success += 1;
-                        g.transferred += transferred;
-                    }
-
-                    println!(
-                        "  \u{2713} [{}] re-harvested, transferred {} TC{}",
-                        canister_id,
-                        format_cycles(transferred),
-                        if topped_up > 0 { " (topped up)" } else { "" }
-                    );
-
-                    HarvestOutcome { succeeded: true, transferred }
-                }
-                Err(e) => {
-                    let reason = e.to_string();
-
-                    {
-                        let mut g = st.lock().await;
-                        g.failed += 1;
-                    }
-
-                    println!("  \u{2717} [{}] re-harvest failed: {}", canister_id, reason);
-
-                    HarvestOutcome { succeeded: false, transferred: 0 }
-                }
-            }
-        });
-
-        if join_set.len() >= 4 {
-            if let Some(res) = join_set.join_next().await {
-                if let Err(e) = res {
-                    println!("  \u{2717} task panicked: {}", e);
-                }
-            }
-        }
-    }
-
-    // Drain remaining tasks
-    while !join_set.is_empty() {
-        if let Some(res) = join_set.join_next().await {
-            if let Err(e) = res {
-                println!("  \u{2717} task panicked: {}", e);
-            }
-        }
-    }
-
-    let final_stats = stats.lock().await;
-
-    println!("\n========== Re-harvest Summary ==========");
-    println!("  Successfully harvested: {}", final_stats.success);
-    println!("  Failed: {}", final_stats.failed);
-    println!(
-        "  Total transferred in this run: {} TC",
-        format_cycles(final_stats.transferred)
-    );
-
-    print_po_cycle_balance("after re-harvest", &root);
-
-    Ok(())
-}
-
-/// Harvest failed canisters that don't have PO as a controller by using the parent canister
-/// to add controllers, then harvesting both parent and child.
-///
-/// Flow:
-/// 1. Query failed canisters (not yet harvested)
-/// 2. For each, check if PO is a controller
-/// 3. If PO is NOT a controller:
-///    a. Extract the parent controller
-///    b. Check if parent is already harvested
-///    c. If yes, install wasm on parent
-///    d. Call add_controllers(child_id) on parent
-///    e. Install wasm on child
-///    f. Harvest child (normal flow)
-///    g. Re-harvest parent (wasm reinstall means it has reserved cycles again)
-///
-/// Usage:
-///   cargo test -p task_runner -- --ignored harvest_failed_with_parent_recovery --nocapture
-///
-/// Usage (only first N for testing):
-///   HARVEST_FAILED_LIMIT=10 \
-///     cargo test -p task_runner -- --ignored harvest_failed_with_parent_recovery --nocapture
-#[tokio::test]
-#[ignore = "harvests canisters with parent recovery on mainnet — run explicitly"]
-async fn harvest_failed_with_parent_recovery() -> Result<()> {
-    let root = workspace_root();
-    let pem_path = root.join("actions_identity.pem");
-
-    let csv_path = root.join(PRINCIPAL_CSV);
-    let mut canisters = read_po_controlled_canisters(&csv_path)?;
-    if let Ok(limit_str) = std::env::var("HARVEST_CANISTER_LIMIT") {
-        if let Ok(limit) = limit_str.parse::<usize>() {
-            canisters.truncate(limit);
-        }
-    }
-    if canisters.is_empty() {
-        println!("No canisters found in {}.", csv_path.display());
-        return Ok(());
-    }
-
-    println!(
-        "Processing {} canisters with parent recovery from {}...",
-        canisters.len(),
-        csv_path.display()
-    );
-
-    // Build wasm + candid
-    println!("\nBuilding individual_user_template + regenerating Candid via generate-candid.sh...");
-    let build_status = std::process::Command::new("bash")
-        .env("DFX_WARNING", "-mainnet_plaintext_identity")
-        .args(["scripts/generate-candid.sh", "individual_user_template"])
-        .current_dir(&root)
-        .status()
-        .context("bash or scripts/generate-candid.sh not found")?;
-    anyhow::ensure!(
-        build_status.success(),
-        "scripts/generate-candid.sh individual_user_template failed"
-    );
-
-    let wasm_path = root.join(INDIVIDUAL_USER_WASM_PATH);
-    let wasm_blob = std::fs::read(&wasm_path)
-        .with_context(|| format!("wasm not found at {}", wasm_path.display()))?;
-    println!("  wasm size: {} bytes", wasm_blob.len());
-
-    let agent = Arc::new(agent_from_pem(&pem_path).await?);
-    let po = Principal::from_text(PLATFORM_ORCHESTRATOR_ID)?;
-
-    let actions_identity = ic_agent::identity::Secp256k1Identity::from_pem_file(&pem_path)
-        .with_context(|| {
-            format!(
-                "failed to load Secp256k1Identity from {}",
-                pem_path.display()
-            )
-        })?;
-    let actions_principal = actions_identity.sender().map_err(|e| {
-        anyhow::anyhow!(
-            "could not derive sender principal from actions_identity.pem: {}",
-            e
-        )
-    })?;
-
-    let wasm_blob = Arc::new(wasm_blob);
-
-    print_po_cycle_balance("before parent recovery harvest", &root);
-
-    let stats = Arc::new(tokio::sync::Mutex::new(BatchStats::default()));
-
-    // Process each canister serially (parent recovery requires sequential steps)
-    for canister_id in canisters {
-        // Hard blocklist: never harvest active production services
-        if is_harvest_blocked(canister_id) {
-            println!("  ⚠ [{}] BLOCKED: on harvest blocklist, skipping.", canister_id);
-            continue;
-        }
-
-        println!("\n  ── Processing {} ──", canister_id);
-
-        // Check if PO is already a controller
-        let po_is_controller = check_if_po_is_controller(&agent, canister_id, &root).await?;
-
-        if po_is_controller {
-            // PO is already a controller, run normal harvest
-            match harvest_canister(&agent, actions_principal, po, canister_id, &wasm_blob).await {
-                Ok((_pre_balance, _pre_reserved, _post_uninstall, transferred, topped_up)) => {
-                    {
-                        let mut g = stats.lock().await;
-                        g.success += 1;
-                        g.transferred += transferred;
-                    }
-
-                    println!(
-                        "  \u{2713} [{}] harvested (PO was controller), transferred {} TC{}",
-                        canister_id,
-                        format_cycles(transferred),
-                        if topped_up > 0 { " (topped up)" } else { "" }
-                    );
-                }
-                Err(e) => {
-                    let reason = e.to_string();
-
-                    {
-                        let mut g = stats.lock().await;
-                        g.failed += 1;
-                    }
-
-                    println!("  \u{2717} [{}] harvest failed: {}", canister_id, reason);
-                }
-            }
-        } else {
-            // PO is NOT a controller, need parent recovery
-            match harvest_with_parent_recovery(
-                &agent,
-                actions_principal,
-                po,
-                canister_id,
-                &wasm_blob,
-                &root,
-            )
-            .await
-            {
-                Ok(transferred) => {
-                    {
-                        let mut g = stats.lock().await;
-                        g.success += 1;
-                        g.transferred += transferred;
-                    }
-
-                    println!(
-                        "  \u{2713} [{}] harvested with parent recovery, transferred {} TC",
-                        canister_id,
-                        format_cycles(transferred)
-                    );
-                }
-                Err(e) => {
-                    let reason = e.to_string();
-
-                    {
-                        let mut g = stats.lock().await;
-                        g.failed += 1;
-                    }
-
-                    println!(
-                        "  \u{2717} [{}] parent recovery failed: {}",
-                        canister_id, reason
-                    );
-                }
-            }
-        }
-    }
-
-    let final_stats = stats.lock().await;
-
-    println!("\n========== Parent Recovery Harvest Summary ==========");
-    println!("  Successfully recovered: {}", final_stats.success);
-    println!("  Still failing: {}", final_stats.failed);
-    println!(
-        "  Total transferred in this run: {} TC",
-        format_cycles(final_stats.transferred)
-    );
-
-    print_po_cycle_balance("after parent recovery harvest", &root);
-
-    Ok(())
-}
-
-/// Check if PO is a controller of the given canister by running `dfx canister info`.
-/// We use dfx because it reads controllers directly from the IC state tree (CLI-only),
-/// which works for any canister regardless of whether we are a controller.
-///
 /// Check if an error message indicates a controller/ownership problem.
 /// These are the cases where parent recovery is worth attempting.
 fn is_controller_ownership_error(reason: &str) -> bool {
@@ -1639,18 +1040,6 @@ fn is_controller_ownership_error(reason: &str) -> bool {
         || reason.contains("add_our_identity_as_controller failed")
         || reason.contains("not a controller")
         || reason.contains("controller") && reason.contains("failed")
-}
-
-/// `canister_status`/`canister_info` on the management canister require controller access,
-/// so they cannot be used here for canisters we don't control.
-async fn check_if_po_is_controller(
-    _agent: &ic_agent::Agent,
-    canister_id: Principal,
-    root: &std::path::Path,
-) -> Result<bool> {
-    let po = Principal::from_text(PLATFORM_ORCHESTRATOR_ID)?;
-    let controllers = get_canister_controllers(canister_id, root)?;
-    Ok(controllers.contains(&po))
 }
 
 /// Get controllers of a canister by running `dfx canister info`.
@@ -1689,12 +1078,12 @@ fn get_canister_controllers(
     Ok(controller_principals)
 }
 
-/// Harvest a canister where PO is not a controller, using parent recovery.
 /// Maximum recursion depth for parent recovery.
 /// Each level tries to harvest a parent canister that may itself need parent recovery.
 /// 5 is generous — real chains are typically 1-2 levels deep.
 const MAX_PARENT_RECOVERY_DEPTH: usize = 5;
 
+/// Harvest a canister where PO is not a controller, using parent recovery.
 async fn harvest_with_parent_recovery(
     agent: &ic_agent::Agent,
     actions_principal: Principal,
@@ -1752,20 +1141,8 @@ async fn harvest_with_parent_recovery_inner(
             "  Child {} already has actions principal as controller, running normal harvest...",
             child_id
         );
-        let (pre_balance, pre_reserved, post_uninstall, transferred, topped_up) =
+        let (_pre_balance, _pre_reserved, _post_uninstall, transferred, _topped_up) =
             harvest_canister(agent, actions_principal, po, child_id, wasm_blob).await?;
-
-        mark_harvested(
-            pool,
-            &child_id,
-            pre_balance,
-            pre_reserved,
-            post_uninstall,
-            transferred,
-            topped_up,
-        )
-        .await?;
-
         return Ok(transferred);
     }
 
@@ -1793,99 +1170,67 @@ async fn harvest_with_parent_recovery_inner(
         // Mark this parent as visited to prevent cycles.
         visited.insert(*parent_id);
 
-        // Check if parent is already harvested
-        let parent_harvested = sqlx::query_scalar!(
-            "SELECT 1 FROM cycle_harvested WHERE principal = ?",
-            parent_id.to_text()
-        )
-        .fetch_optional(pool)
-        .await?
-        .is_some();
-
-        if !parent_harvested {
-            println!(
-                "  Parent {} is not yet harvested, harvesting it first...",
-                parent_id
-            );
-
-            // Pre-harvest deposit for parent too
-            if let Err(e) = ensure_canister_has_cycles(agent, po, *parent_id).await {
-                println!("  ⚠ pre-harvest deposit for parent failed: {}", e);
-            }
-
-            // Attempt normal harvest on parent first.
-            match harvest_canister(agent, actions_principal, po, *parent_id, wasm_blob).await {
-                Ok((pre_balance, pre_reserved, post_uninstall, transferred, topped_up)) => {
-                    mark_harvested(
-                        pool,
-                        parent_id,
-                        pre_balance,
-                        pre_reserved,
-                        post_uninstall,
-                        transferred,
-                        topped_up,
-                    )
-                    .await?;
-                    println!(
-                        "  ✓ parent harvested first, transferred {} TC",
-                        format_cycles(transferred)
-                    );
-                }
-                Err(e) => {
-                    let reason = e.to_string();
-                    // If parent also has controller issues, recurse into parent recovery.
-                    if is_controller_ownership_error(&reason) {
-                        println!(
-                            "  ⚠ parent harvest failed with controller error, \
-                             recursing into parent recovery for {}...",
-                            parent_id
-                        );
-                        match Box::pin(harvest_with_parent_recovery_inner(
-                            agent,
-                            actions_principal,
-                            po,
-                            *parent_id,
-                            wasm_blob,
-                            pool,
-                            root,
-                            depth + 1,
-                            visited,
-                        )).await
-                        {
-                            Ok(_) => {
-                                println!("  ✓ parent recovered via recursive parent recovery");
-                            }
-                            Err(recurse_err) => {
-                                println!(
-                                    "  ⚠ parent {} recursive recovery failed: {}, trying next parent...",
-                                    parent_id, recurse_err
-                                );
-                                last_error = Some(recurse_err);
-                                continue;
-                            }
-                        }
-                    } else {
-                        println!(
-                            "  ⚠ parent {} harvest failed (non-controller error): {}, trying next parent...",
-                            parent_id, reason
-                        );
-                        last_error = Some(anyhow::anyhow!(
-                            "parent {} harvest failed (non-controller error): {}",
-                            parent_id,
-                            reason
-                        ));
-                        continue;
-                    }
-                }
-            }
-        } else {
-            println!(
-                "  Parent {} is harvested, proceeding with recovery",
-                parent_id
-            );
+        // Attempt normal harvest on parent first.
+        if let Err(e) = ensure_canister_has_cycles(agent, po, *parent_id).await {
+            println!("  \u{26a0} pre-harvest deposit for parent failed: {}", e);
         }
 
-        // --- Parent is ready (harvested or just harvested). Now use it for recovery. ---
+        match harvest_canister(agent, actions_principal, po, *parent_id, wasm_blob).await {
+            Ok((_pre_balance, _pre_reserved, _post_uninstall, transferred, _topped_up)) => {
+                println!(
+                    "  \u{2713} parent harvested first, transferred {} TC",
+                    format_cycles(transferred)
+                );
+            }
+            Err(e) => {
+                let reason = e.to_string();
+                // If parent also has controller issues, recurse into parent recovery.
+                if is_controller_ownership_error(&reason) {
+                    println!(
+                        "  \u{26a0} parent harvest failed with controller error, \
+                         recursing into parent recovery for {}...",
+                        parent_id
+                    );
+                    match Box::pin(harvest_with_parent_recovery_inner(
+                        agent,
+                        actions_principal,
+                        po,
+                        *parent_id,
+                        wasm_blob,
+                        root,
+                        depth + 1,
+                        visited,
+                    ))
+                    .await
+                    {
+                        Ok(_) => {
+                            println!("  \u{2713} parent recovered via recursive parent recovery");
+                        }
+                        Err(recurse_err) => {
+                            println!(
+                                "  \u{26a0} parent {} recursive recovery failed: {}, trying next parent...",
+                                parent_id, recurse_err
+                            );
+                            last_error = Some(recurse_err);
+                            continue;
+                        }
+                    }
+                } else {
+                    println!(
+                        "  \u{26a0} parent {} harvest failed (non-controller error): {}, trying next parent...",
+                        parent_id, reason
+                    );
+                    last_error = Some(anyhow::anyhow!(
+                        "parent {} harvest failed (non-controller error): {}",
+                        parent_id,
+                        reason
+                    ));
+                    continue;
+                }
+            }
+        }
+
+        // --- Parent is ready. Now use it for recovery. ---
 
         // Add actions_identity as controller of parent via PO
         println!(
@@ -1899,7 +1244,7 @@ async fn harvest_with_parent_recovery_inner(
             .call_and_wait()
             .await
             .map_err(|e| anyhow::anyhow!("add_our_identity_as_controller on parent failed: {}", e))?;
-        println!("  ✓ actions_identity added as controller of parent");
+        println!("  \u{2713} actions_identity added as controller of parent");
 
         // Top up parent with cycles so it can afford wasm install
         let deposit_arg = encode_args((parent_id, TOP_UP_AMOUNT))?;
@@ -1909,7 +1254,7 @@ async fn harvest_with_parent_recovery_inner(
             .call_and_wait()
             .await
             .map_err(|e| anyhow::anyhow!("deposit_cycles_to_canister on parent failed: {}", e))?;
-        println!("  ✓ topped up parent with 0.5T");
+        println!("  \u{2713} topped up parent with 0.5T");
 
         // Install wasm on parent (now we have access as co-controller)
         println!("  Installing wasm on parent {}...", parent_id);
@@ -1951,50 +1296,28 @@ async fn harvest_with_parent_recovery_inner(
         // Harvest child using the normal, tested flow
         println!("  Harvesting child {}...", child_id);
         let (
-            child_pre_balance,
-            child_pre_reserved,
-            child_post_uninstall,
+            _child_pre_balance,
+            _child_pre_reserved,
+            _child_post_uninstall,
             child_transferred,
-            child_topped_up,
+            _child_topped_up,
         ) = harvest_canister(agent, actions_principal, po, child_id, wasm_blob).await?;
-
-        mark_harvested(
-            pool,
-            &child_id,
-            child_pre_balance,
-            child_pre_reserved,
-            child_post_uninstall,
-            child_transferred,
-            child_topped_up,
-        )
-        .await?;
         println!(
-            "  ✓ child harvested, transferred {} TC",
+            "  \u{2713} child harvested, transferred {} TC",
             format_cycles(child_transferred)
         );
 
         // Re-harvest parent using the normal flow (wasm reinstall means it has reserved cycles again)
         println!("  Re-harvesting parent {}...", parent_id);
         let (
-            parent_pre_balance,
-            parent_pre_reserved,
-            parent_post_uninstall,
+            _parent_pre_balance,
+            _parent_pre_reserved,
+            _parent_post_uninstall,
             parent_transferred,
-            parent_topped_up,
+            _parent_topped_up,
         ) = harvest_canister(agent, actions_principal, po, *parent_id, wasm_blob).await?;
-
-        mark_harvested(
-            pool,
-            parent_id,
-            parent_pre_balance,
-            parent_pre_reserved,
-            parent_post_uninstall,
-            parent_transferred,
-            parent_topped_up,
-        )
-        .await?;
         println!(
-            "  ✓ parent re-harvested, transferred {} TC",
+            "  \u{2713} parent re-harvested, transferred {} TC",
             format_cycles(parent_transferred)
         );
 
@@ -2002,62 +1325,7 @@ async fn harvest_with_parent_recovery_inner(
     }
 
     // All parents failed — return the last error (or a generic message if none).
-    Err(last_error.unwrap_or_else(|| anyhow::anyhow!(
-        "all canister parents failed for child {}",
-        child_id
-    )))
-}
-
-/// Print a safe, read-only snapshot of the current harvest progress against the
-/// production `ic_canisters.db`. No on-chain calls, no mutations.
-///
-/// Run:
-///   cargo test -p task_runner -- --ignored harvest_status --nocapture
-#[tokio::test]
-#[ignore = "read-only status report against the real DB"]
-async fn harvest_status() -> Result<()> {
-    let root = workspace_root();
-    let db_path = root.join(DB_PATH);
-
-    let pool = open_pool(db_path.to_str().unwrap()).await?;
-
-    let total_controlled = total_controlled_count(&pool).await?;
-    let pending = pending_harvest_count(&pool).await?;
-    let (done, failed) = harvest_counts(&pool).await?;
-
-    println!("\n========== Harvest Status ==========");
-    println!(
-        "  Source list (po_controlled_canisters): {}",
-        total_controlled
-    );
-    println!("  Already harvested (cycle_harvested):     {}", done);
-    println!("  Failed (cycle_harvest_failures):         {}", failed);
-    println!("  Still pending:                           {}", pending);
-    println!(
-        "  Progress:                                {:.1}%",
-        if total_controlled > 0 {
-            (done as f64 / total_controlled as f64) * 100.0
-        } else {
-            0.0
-        }
-    );
-
-    // Show a small sample of pending work (safe to print).
-    if pending > 0 {
-        let sample = pending_harvests(&pool, 5).await?;
-        println!("\n  Next pending (up to 5):");
-        for (i, p) in sample.iter().enumerate() {
-            println!("    [{}] {}", i + 1, p);
-        }
-        if pending > sample.len() as i64 {
-            println!("    ... and {} more", pending - sample.len() as i64);
-        }
-    } else {
-        println!("\n  No pending canisters remaining.");
-    }
-
-    println!("\n  DB path: {}", db_path.display());
-    println!("====================================\n");
-
-    Ok(())
+    Err(last_error.unwrap_or_else(|| {
+        anyhow::anyhow!("all canister parents failed for child {}", child_id)
+    }))
 }

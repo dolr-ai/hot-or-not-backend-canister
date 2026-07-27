@@ -24,7 +24,6 @@ use candid::{Encode, Principal};
 
 use crate::{
     agent::{agent_from_pem, workspace_root},
-    db::{next_release_version, open_pool, DB_PATH},
     sns_types::{
         Action, CanisterInstallMode, Command, DeregisterDappCanisters, InstallCodeArgument,
         ManageNeuron, Proposal, RegisterDappCanisters, ACTIONS_PRINCIPAL, NEURON_SUBACCOUNT,
@@ -38,10 +37,8 @@ const WASM_PATH: &str =
 async fn submit_proposal(action: Action) -> u64 {
     let root = workspace_root();
     let pem_path = root.join("actions_identity.pem");
-    let db_path = root.join(DB_PATH);
 
-    let pool = open_pool(db_path.to_str().unwrap()).await.unwrap();
-    let version = next_release_version(&pool).await.unwrap();
+    let version = format!("v{}", chrono::Utc::now().format("%Y%m%d%H%M%S"));
     println!("releasing {version}");
 
     let agent = agent_from_pem(&pem_path).await.unwrap();
