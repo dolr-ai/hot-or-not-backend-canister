@@ -39,16 +39,10 @@ use anyhow::{Context, Result};
 use candid::{encode_args, Encode, Principal};
 use ic_agent::Identity;
 use std::collections::HashSet;
-use std::sync::{Arc, Mutex as StdMutex};
-use tokio::sync::Semaphore;
-use tokio::task::JoinSet;
 
 use crate::{
     agent::{agent_from_pem, workspace_root},
-    db::{
-        failed_harvest_principals, harvest_counts, mark_harvest_failed, mark_harvested, open_pool,
-        pending_harvest_count, pending_harvests, total_controlled_count, DB_PATH,
-    },
+    canister_list::{read_canisters, PRINCIPAL_CSV},
     sns_types::PLATFORM_ORCHESTRATOR_ID,
 };
 
@@ -82,7 +76,6 @@ const INDIVIDUAL_USER_WASM_PATH: &str =
 /// These are excluded from all harvest flows regardless of DB state.
 const HARVEST_BLOCKLIST: &[&str] = &[
     "ivkka-7qaaa-aaaas-qbg3q-cai",  // user_info_service
-    "h2jgv-ayaaa-aaaas-qbh4a-cai",  // rate_limits
     "gxhc3-pqaaa-aaaas-qbh3q-cai",  // user_post_service
 ];
 
@@ -879,33 +872,6 @@ fn print_po_cycle_balance(label: &str, root: &std::path::Path) {
     println!("=== end PO status ({}) ===\n", label);
 }
 
-#[derive(Default)]
-struct BatchStats {
-    success: usize,
-    failed: usize,
-    transferred: u128,
-}
-
-#[allow(unused)]
-struct HarvestOutcome {
-    succeeded: bool,
-    transferred: u128,
-}
-
-/// RAII guard to release the claim when the task ends (even on panic).
-struct ClaimGuard {
-    claimed: Arc<StdMutex<HashSet<Principal>>>,
-    id: Principal,
-}
-
-impl Drop for ClaimGuard {
-    fn drop(&mut self) {
-        if let Ok(mut set) = self.claimed.lock() {
-            set.remove(&self.id);
-        }
-    }
-}
-
 // ── Helper types for PO API responses ─────────────────────────────────────────
 
 #[derive(candid::CandidType, candid::Deserialize, Debug)]
@@ -936,19 +902,17 @@ enum CanisterRunningStatus {
 async fn harvest_single_canister() -> Result<()> {
     let root = workspace_root();
     let pem_path = root.join("actions_identity.pem");
-    let db_path = root.join(DB_PATH);
-
-    let pool = open_pool(db_path.to_str().unwrap()).await?;
 
     // Allow forcing an exact canister (e.g. the one from a previous partial run)
-    // instead of letting pending_harvests pick the "next" from the DB.
+    // instead of picking the first from the principal.csv list.
     let canister_id: Principal = if let Ok(id_str) = std::env::var("HARVEST_CANISTER_ID") {
         Principal::from_text(&id_str)
             .with_context(|| format!("invalid HARVEST_CANISTER_ID: {}", id_str))?
     } else {
-        let pending = pending_harvests(&pool, 1).await?;
+        let csv_path = root.join(PRINCIPAL_CSV);
+        let pending = read_canisters(&csv_path, 1)?;
         if pending.is_empty() {
-            println!("No pending canisters to harvest.");
+            println!("No canisters found in {}.", csv_path.display());
             return Ok(());
         }
         pending[0]
@@ -1031,20 +995,8 @@ async fn harvest_single_canister() -> Result<()> {
     }
 
     match harvest_canister(&agent, actions_principal, po, canister_id, &wasm_blob).await {
-        Ok((pre_balance, pre_reserved, post_uninstall, transferred, topped_up)) => {
-            // Mark as harvested in DB — only after all steps succeed and validations pass.
-            mark_harvested(
-                &pool,
-                &canister_id,
-                pre_balance,
-                pre_reserved,
-                post_uninstall,
-                transferred,
-                topped_up,
-            )
-            .await?;
-
-            println!("\n✓ Harvest complete for {}", canister_id);
+        Ok((_pre_balance, _pre_reserved, _post_uninstall, transferred, topped_up)) => {
+            println!("\n✓ Harvest complete for {} (transferred {} TC{})", canister_id, format_cycles(transferred), if topped_up > 0 { " (topped up)" } else { "" });
         }
         Err(e) => {
             let reason = e.to_string();
@@ -1064,7 +1016,6 @@ async fn harvest_single_canister() -> Result<()> {
                     po,
                     canister_id,
                     &wasm_blob,
-                    &pool,
                     &root,
                 )
                 .await
@@ -1078,7 +1029,6 @@ async fn harvest_single_canister() -> Result<()> {
                     }
                     Err(parent_err) => {
                         let parent_reason = parent_err.to_string();
-                        let _ = mark_harvest_failed(&pool, &canister_id, &parent_reason).await;
                         println!(
                             "\n✗ Parent recovery also failed for {}: {}",
                             canister_id, parent_reason
@@ -1086,7 +1036,6 @@ async fn harvest_single_canister() -> Result<()> {
                     }
                 }
             } else {
-                let _ = mark_harvest_failed(&pool, &canister_id, &reason).await;
                 println!("\n✗ Harvest failed for {}: {}", canister_id, reason);
             }
         }
@@ -1102,23 +1051,18 @@ async fn harvest_single_canister() -> Result<()> {
 async fn harvest_cycles_batch() -> Result<()> {
     let root = workspace_root();
     let pem_path = root.join("actions_identity.pem");
-    let db_path = root.join(DB_PATH);
 
-    let pool = open_pool(db_path.to_str().unwrap()).await?;
-
-    // Check current progress.
-    let (done, failed) = harvest_counts(&pool).await?;
-    println!("Current progress: {} harvested, {} failures", done, failed);
-
-    let initial_pending = pending_harvests(&pool, 1).await?;
-    if initial_pending.is_empty() {
-        println!("No pending canisters to harvest.");
+    let csv_path = root.join(PRINCIPAL_CSV);
+    let all_canisters = read_po_controlled_canisters(&csv_path)?;
+    if all_canisters.is_empty() {
+        println!("No canisters found in {}.", csv_path.display());
         return Ok(());
     }
 
     println!(
-        "Processing all pending canisters ({} already done) with up to 128 in flight...",
-        done
+        "Processing {} canisters from {} with up to 128 in flight...",
+        all_canisters.len(),
+        csv_path.display()
     );
 
     // Build individual_user_template wasm once + auto-regenerate its Candid interface
@@ -1174,200 +1118,149 @@ async fn harvest_cycles_batch() -> Result<()> {
 
     // Wrap for sharing across concurrent tasks.
     let wasm_blob = Arc::new(wasm_blob);
-    let pool = Arc::new(pool);
 
     // Snapshot PO balance before any harvest transfers this batch.
     print_po_cycle_balance("before batch harvest", &root);
 
     let semaphore = Arc::new(Semaphore::new(16));
     let stats = Arc::new(tokio::sync::Mutex::new(BatchStats::default()));
-    let claimed = Arc::new(StdMutex::new(HashSet::<Principal>::new()));
     let mut join_set: JoinSet<HarvestOutcome> = JoinSet::new();
 
-    loop {
-        // Claim unclaimed candidates for this round.
-        let available = semaphore.available_permits();
-        let mut to_spawn = vec![];
-        if available > 0 {
-            let fetch_n = available as i64;
-            let candidates = pending_harvests(pool.as_ref(), fetch_n)
-                .await
-                .unwrap_or_default();
-            {
-                let mut c = claimed.lock().unwrap();
-                for cid in candidates {
-                    if !c.contains(&cid) {
-                        c.insert(cid);
-                        to_spawn.push(cid);
-                    }
-                }
-            }
+    for canister_id in all_canisters {
+        // Hard blocklist: never harvest active production services
+        if is_harvest_blocked(canister_id) {
+            println!("  ⚠ [{}] BLOCKED: on harvest blocklist, skipping.", canister_id);
+            continue;
         }
 
-        for canister_id in to_spawn {
-            // Hard blocklist: never harvest active production services
-            if is_harvest_blocked(canister_id) {
-                println!("  ⚠ [{}] BLOCKED: on harvest blocklist, skipping.", canister_id);
-                continue;
+        let sem = semaphore.clone();
+        let ag = agent.clone();
+        let wsm = wasm_blob.clone();
+        let act = actions_principal.clone();
+        let p = po.clone();
+        let st = stats.clone();
+        let root = root.to_path_buf();
+
+        join_set.spawn(async move {
+            let _permit = sem.acquire().await.expect("semaphore permit");
+
+            // Pre-harvest: deposit cycles to ensure out-of-cycles canisters
+            // can be reached and controller principals are set consistently.
+            if let Err(e) = ensure_canister_has_cycles(&ag, p, canister_id).await {
+                println!("  ⚠ [{}] pre-harvest deposit failed: {}", canister_id, e);
             }
 
-            let sem = semaphore.clone();
-            let ag = agent.clone();
-            let wsm = wasm_blob.clone();
-            let pl = pool.clone();
-            let act = actions_principal.clone();
-            let p = po.clone();
-            let st = stats.clone();
-            let cl = claimed.clone();
-            let root = root.to_path_buf();
+            match harvest_canister(&ag, act, p, canister_id, &wsm).await {
+                Ok((_pre_balance, _pre_reserved, _post_uninstall, transferred, topped_up)) => {
+                    {
+                        let mut g = st.lock().await;
+                        g.success += 1;
+                        g.transferred += transferred;
+                    }
 
-            join_set.spawn(async move {
-                let _guard = ClaimGuard {
-                    claimed: cl,
-                    id: canister_id,
-                };
-                let _permit = sem.acquire().await.expect("semaphore permit");
+                    println!(
+                        "  \u{2713} [{}] harvested, transferred {} TC{}",
+                        canister_id,
+                        format_cycles(transferred),
+                        if topped_up > 0 { " (topped up)" } else { "" }
+                    );
 
-                // Pre-harvest: deposit cycles to ensure out-of-cycles canisters
-                // can be reached and controller principals are set consistently.
-                if let Err(e) = ensure_canister_has_cycles(&ag, p, canister_id).await {
-                    println!("  ⚠ [{}] pre-harvest deposit failed: {}", canister_id, e);
+                    HarvestOutcome {
+                        succeeded: true,
+                        transferred,
+                    }
                 }
+                Err(e) => {
+                    let reason = e.to_string();
 
-                match harvest_canister(&ag, act, p, canister_id, &wsm).await {
-                    Ok((pre_balance, pre_reserved, post_uninstall, transferred, topped_up)) => {
-                        if let Err(e) = mark_harvested(
-                            pl.as_ref(),
-                            &canister_id,
-                            pre_balance,
-                            pre_reserved,
-                            post_uninstall,
-                            transferred,
-                            topped_up,
+                    // If the failure looks like a controller/ownership error,
+                    // try parent recovery as a fallback (additive, non-destructive).
+                    if is_controller_ownership_error(&reason) {
+                        println!(
+                            "  \u{26a0} [{}] normal harvest failed with controller error, \
+                             attempting parent recovery...",
+                            canister_id
+                        );
+
+                        match harvest_with_parent_recovery(
+                            &ag,
+                            act,
+                            p,
+                            canister_id,
+                            &wsm,
+                            &root,
                         )
                         .await
                         {
-                            println!(
-                                "  warning: mark_harvested failed for {}: {}",
-                                canister_id, e
-                            );
-                        }
+                            Ok(transferred) => {
+                                {
+                                    let mut g = st.lock().await;
+                                    g.success += 1;
+                                    g.transferred += transferred;
+                                }
 
+                                println!(
+                                    "  \u{2713} [{}] harvested via parent recovery, \
+                                     transferred {} TC",
+                                    canister_id,
+                                    format_cycles(transferred)
+                                );
+
+                                HarvestOutcome {
+                                    succeeded: true,
+                                    transferred,
+                                }
+                            }
+                            Err(parent_err) => {
+                                let parent_reason = parent_err.to_string();
+
+                                {
+                                    let mut g = st.lock().await;
+                                    g.failed += 1;
+                                }
+
+                                println!(
+                                    "  \u{2717} [{}] parent recovery also failed: {}",
+                                    canister_id, parent_reason
+                                );
+
+                                HarvestOutcome {
+                                    succeeded: false,
+                                    transferred: 0,
+                                }
+                            }
+                        }
+                    } else {
                         {
                             let mut g = st.lock().await;
-                            g.success += 1;
-                            g.transferred += transferred;
+                            g.failed += 1;
                         }
 
-                        println!(
-                            "  \u{2713} [{}] harvested, transferred {} TC{}",
-                            canister_id,
-                            format_cycles(transferred),
-                            if topped_up > 0 { " (topped up)" } else { "" }
-                        );
+                        println!("  \u{2717} [{}] failed: {}", canister_id, reason);
 
                         HarvestOutcome {
-                            succeeded: true,
-                            transferred,
-                        }
-                    }
-                    Err(e) => {
-                        let reason = e.to_string();
-
-                        // If the failure looks like a controller/ownership error,
-                        // try parent recovery as a fallback (additive, non-destructive).
-                        if is_controller_ownership_error(&reason) {
-                            println!(
-                                "  \u{26a0} [{}] normal harvest failed with controller error, \
-                                 attempting parent recovery...",
-                                canister_id
-                            );
-
-                            match harvest_with_parent_recovery(
-                                &ag,
-                                act,
-                                p,
-                                canister_id,
-                                &wsm,
-                                pl.as_ref(),
-                                &root,
-                            )
-                            .await
-                            {
-                                Ok(transferred) => {
-                                    {
-                                        let mut g = st.lock().await;
-                                        g.success += 1;
-                                        g.transferred += transferred;
-                                    }
-
-                                    println!(
-                                        "  \u{2713} [{}] harvested via parent recovery, \
-                                         transferred {} TC",
-                                        canister_id,
-                                        format_cycles(transferred)
-                                    );
-
-                                    HarvestOutcome {
-                                        succeeded: true,
-                                        transferred,
-                                    }
-                                }
-                                Err(parent_err) => {
-                                    let parent_reason = parent_err.to_string();
-                                    let _ = mark_harvest_failed(
-                                        pl.as_ref(),
-                                        &canister_id,
-                                        &parent_reason,
-                                    )
-                                    .await;
-
-                                    {
-                                        let mut g = st.lock().await;
-                                        g.failed += 1;
-                                    }
-
-                                    println!(
-                                        "  \u{2717} [{}] parent recovery also failed: {}",
-                                        canister_id, parent_reason
-                                    );
-
-                                    HarvestOutcome {
-                                        succeeded: false,
-                                        transferred: 0,
-                                    }
-                                }
-                            }
-                        } else {
-                            // Not a controller error, record as normal failure.
-                            let _ = mark_harvest_failed(pl.as_ref(), &canister_id, &reason).await;
-
-                            {
-                                let mut g = st.lock().await;
-                                g.failed += 1;
-                            }
-
-                            println!("  \u{2717} [{}] failed: {}", canister_id, reason);
-
-                            HarvestOutcome {
-                                succeeded: false,
-                                transferred: 0,
-                            }
+                            succeeded: false,
+                            transferred: 0,
                         }
                     }
                 }
-            });
-        }
+            }
+        });
 
-        if join_set.is_empty() {
-            let pending_check = pending_harvests(pool.as_ref(), 1).await.unwrap_or_default();
-            if pending_check.is_empty() {
-                break;
+        // Throttle: when the semaphore is full, wait for a task to complete.
+        if join_set.len() >= 16 {
+            if let Some(res) = join_set.join_next().await {
+                if let Err(e) = res {
+                    println!("  \u{2717} harvest task panicked: {}", e);
+                }
             }
         }
+    }
 
-        if let Some(result) = join_set.join_next().await {
-            if let Err(e) = result {
+    // Drain remaining tasks.
+    while !join_set.is_empty() {
+        if let Some(res) = join_set.join_next().await {
+            if let Err(e) = res {
                 println!("  \u{2717} harvest task panicked: {}", e);
             }
         }
@@ -1376,7 +1269,6 @@ async fn harvest_cycles_batch() -> Result<()> {
     let final_stats = stats.lock().await;
 
     // Summary.
-    let (final_done, final_failed) = harvest_counts(&pool).await?;
     println!("\n========== Batch Summary ==========");
     println!("  Harvested this batch: {}", final_stats.success);
     println!("  Failed this batch: {}", final_stats.failed);
@@ -1384,8 +1276,6 @@ async fn harvest_cycles_batch() -> Result<()> {
         "  Total transferred this batch: {} TC",
         format_cycles(final_stats.transferred)
     );
-    println!("  Total harvested (all time): {}", final_done);
-    println!("  Total failures (all time): {}", final_failed);
 
     // Snapshot PO balance after the batch to see if the harvest deposits
     // actually increased its cycle balance.
@@ -1394,48 +1284,38 @@ async fn harvest_cycles_batch() -> Result<()> {
     Ok(())
 }
 
-/// Re-process only the canisters that previously failed (in `cycle_harvest_failures`)
-/// but have not yet succeeded (not in `cycle_harvested`).
+/// Re-harvest all canisters from the principal.csv list.
 ///
-/// By default (or when `HARVEST_FAILED_LIMIT` <= 0) it processes *all* currently
-/// failed canisters with no artificial limit. This is the mode you usually want
-/// when you say "do all the failed ones".
+/// Without a tracking DB there is no "failed" vs "harvested" distinction —
+/// this simply re-runs the harvest over the full list (or the first N if
+/// `HARVEST_CANISTER_LIMIT` is set). Use it to retry canisters that failed
+/// in a previous `harvest_cycles_batch` run.
 ///
-/// Pass a positive number to cap the run (handy for testing a small subset first).
-///
-/// Usage (process every single failed canister – the recommended way):
+/// Usage (process every canister):
 ///   cargo test -p task_runner -- --ignored harvest_failed_canisters --nocapture
 ///
 /// Usage (only the first 10 for a trial run):
-///   HARVEST_FAILED_LIMIT=10 \
+///   HARVEST_CANISTER_LIMIT=10 \
 ///     cargo test -p task_runner -- --ignored harvest_failed_canisters --nocapture
 #[tokio::test]
-#[ignore = "harvests only previously-failed canisters on mainnet — run explicitly"]
+#[ignore = "re-harvests canisters from principal.csv on mainnet — run explicitly"]
 async fn harvest_failed_canisters() -> Result<()> {
     let root = workspace_root();
     let pem_path = root.join("actions_identity.pem");
-    let db_path = root.join(DB_PATH);
 
-    let pool = open_pool(db_path.to_str().unwrap()).await?;
-
-    let raw_limit: i64 = std::env::var("HARVEST_FAILED_LIMIT")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0);
-
-    // Pass 0 or negative through unchanged → `failed_harvest_principals` will treat it as "no limit".
-    let limit = if raw_limit <= 0 { 0i64 } else { raw_limit };
-
-    let failed = failed_harvest_principals(&pool, limit).await?;
-    if failed.is_empty() {
-        println!("No previously-failed canisters to re-harvest.");
+    let csv_path = root.join(PRINCIPAL_CSV);
+    let mut canisters = read_po_controlled_canisters(&csv_path)?;
+    if let Ok(limit_str) = std::env::var("HARVEST_CANISTER_LIMIT") {
+        if let Ok(limit) = limit_str.parse::<usize>() {
+            canisters.truncate(limit);
+        }
+    }
+    if canisters.is_empty() {
+        println!("No canisters found in {}.", csv_path.display());
         return Ok(());
     }
 
-    println!(
-        "Re-harvesting {} previously failed canisters...",
-        failed.len()
-    );
+    println!("Re-harvesting {} canisters from {}...", canisters.len(), csv_path.display());
 
     // Build wasm + candid (same as other harvest entry points — with dfx build)
     println!("\nBuilding individual_user_template + regenerating Candid via generate-candid.sh...");
@@ -1473,68 +1353,31 @@ async fn harvest_failed_canisters() -> Result<()> {
     })?;
 
     let wasm_blob = Arc::new(wasm_blob);
-    let pool = Arc::new(pool);
 
-    print_po_cycle_balance("before failed re-harvest", &root);
+    print_po_cycle_balance("before re-harvest", &root);
 
     let semaphore = Arc::new(Semaphore::new(4));
     let stats = Arc::new(tokio::sync::Mutex::new(BatchStats::default()));
-    let claimed = Arc::new(StdMutex::new(HashSet::<Principal>::new()));
     let mut join_set: JoinSet<HarvestOutcome> = JoinSet::new();
 
-    for canister_id in failed {
-        let available = semaphore.available_permits();
-        if available == 0 {
-            if let Some(res) = join_set.join_next().await {
-                if let Err(e) = res {
-                    println!("  \u{2717} task panicked: {}", e);
-                }
-            }
-        }
-
-        {
-            let mut c = claimed.lock().unwrap();
-            if c.contains(&canister_id) {
-                continue;
-            }
-            c.insert(canister_id);
+    for canister_id in canisters {
+        if is_harvest_blocked(canister_id) {
+            println!("  ⚠ [{}] BLOCKED: on harvest blocklist, skipping.", canister_id);
+            continue;
         }
 
         let sem = semaphore.clone();
         let ag = agent.clone();
         let wsm = wasm_blob.clone();
-        let pl = pool.clone();
         let act = actions_principal.clone();
         let p = po.clone();
         let st = stats.clone();
-        let cl = claimed.clone();
 
         join_set.spawn(async move {
-            let _guard = ClaimGuard {
-                claimed: cl,
-                id: canister_id,
-            };
             let _permit = sem.acquire().await.expect("semaphore permit");
 
             match harvest_canister(&ag, act, p, canister_id, &wsm).await {
-                Ok((pre_balance, pre_reserved, post_uninstall, transferred, topped_up)) => {
-                    if let Err(e) = mark_harvested(
-                        pl.as_ref(),
-                        &canister_id,
-                        pre_balance,
-                        pre_reserved,
-                        post_uninstall,
-                        transferred,
-                        topped_up,
-                    )
-                    .await
-                    {
-                        println!(
-                            "  warning: mark_harvested failed for {}: {}",
-                            canister_id, e
-                        );
-                    }
-
+                Ok((_pre_balance, _pre_reserved, _post_uninstall, transferred, topped_up)) => {
                     {
                         let mut g = st.lock().await;
                         g.success += 1;
@@ -1548,14 +1391,10 @@ async fn harvest_failed_canisters() -> Result<()> {
                         if topped_up > 0 { " (topped up)" } else { "" }
                     );
 
-                    HarvestOutcome {
-                        succeeded: true,
-                        transferred,
-                    }
+                    HarvestOutcome { succeeded: true, transferred }
                 }
                 Err(e) => {
                     let reason = e.to_string();
-                    let _ = mark_harvest_failed(pl.as_ref(), &canister_id, &reason).await;
 
                     {
                         let mut g = st.lock().await;
@@ -1564,13 +1403,18 @@ async fn harvest_failed_canisters() -> Result<()> {
 
                     println!("  \u{2717} [{}] re-harvest failed: {}", canister_id, reason);
 
-                    HarvestOutcome {
-                        succeeded: false,
-                        transferred: 0,
-                    }
+                    HarvestOutcome { succeeded: false, transferred: 0 }
                 }
             }
         });
+
+        if join_set.len() >= 4 {
+            if let Some(res) = join_set.join_next().await {
+                if let Err(e) = res {
+                    println!("  \u{2717} task panicked: {}", e);
+                }
+            }
+        }
     }
 
     // Drain remaining tasks
@@ -1584,18 +1428,15 @@ async fn harvest_failed_canisters() -> Result<()> {
 
     let final_stats = stats.lock().await;
 
-    let (final_done, final_failed) = harvest_counts(&pool).await?;
-    println!("\n========== Failed Re-harvest Summary ==========");
-    println!("  Successfully recovered: {}", final_stats.success);
-    println!("  Still failing: {}", final_stats.failed);
+    println!("\n========== Re-harvest Summary ==========");
+    println!("  Successfully harvested: {}", final_stats.success);
+    println!("  Failed: {}", final_stats.failed);
     println!(
         "  Total transferred in this run: {} TC",
         format_cycles(final_stats.transferred)
     );
-    println!("  Total harvested (all time): {}", final_done);
-    println!("  Total failures recorded (all time): {}", final_failed);
 
-    print_po_cycle_balance("after failed re-harvest", &root);
+    print_po_cycle_balance("after re-harvest", &root);
 
     Ok(())
 }
@@ -1622,30 +1463,27 @@ async fn harvest_failed_canisters() -> Result<()> {
 ///   HARVEST_FAILED_LIMIT=10 \
 ///     cargo test -p task_runner -- --ignored harvest_failed_with_parent_recovery --nocapture
 #[tokio::test]
-#[ignore = "harvests failed canisters with parent recovery on mainnet — run explicitly"]
+#[ignore = "harvests canisters with parent recovery on mainnet — run explicitly"]
 async fn harvest_failed_with_parent_recovery() -> Result<()> {
     let root = workspace_root();
     let pem_path = root.join("actions_identity.pem");
-    let db_path = root.join(DB_PATH);
 
-    let pool = open_pool(db_path.to_str().unwrap()).await?;
-
-    let raw_limit: i64 = std::env::var("HARVEST_FAILED_LIMIT")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0);
-
-    let limit = if raw_limit <= 0 { 0i64 } else { raw_limit };
-
-    let failed = failed_harvest_principals(&pool, limit).await?;
-    if failed.is_empty() {
-        println!("No previously-failed canisters to re-harvest.");
+    let csv_path = root.join(PRINCIPAL_CSV);
+    let mut canisters = read_po_controlled_canisters(&csv_path)?;
+    if let Ok(limit_str) = std::env::var("HARVEST_CANISTER_LIMIT") {
+        if let Ok(limit) = limit_str.parse::<usize>() {
+            canisters.truncate(limit);
+        }
+    }
+    if canisters.is_empty() {
+        println!("No canisters found in {}.", csv_path.display());
         return Ok(());
     }
 
     println!(
-        "Processing {} previously failed canisters with parent recovery...",
-        failed.len()
+        "Processing {} canisters with parent recovery from {}...",
+        canisters.len(),
+        csv_path.display()
     );
 
     // Build wasm + candid
@@ -1684,14 +1522,13 @@ async fn harvest_failed_with_parent_recovery() -> Result<()> {
     })?;
 
     let wasm_blob = Arc::new(wasm_blob);
-    let pool = Arc::new(pool);
 
     print_po_cycle_balance("before parent recovery harvest", &root);
 
     let stats = Arc::new(tokio::sync::Mutex::new(BatchStats::default()));
 
-    // Process each failed canister serially (parent recovery requires sequential steps)
-    for canister_id in failed {
+    // Process each canister serially (parent recovery requires sequential steps)
+    for canister_id in canisters {
         // Hard blocklist: never harvest active production services
         if is_harvest_blocked(canister_id) {
             println!("  ⚠ [{}] BLOCKED: on harvest blocklist, skipping.", canister_id);
@@ -1706,24 +1543,7 @@ async fn harvest_failed_with_parent_recovery() -> Result<()> {
         if po_is_controller {
             // PO is already a controller, run normal harvest
             match harvest_canister(&agent, actions_principal, po, canister_id, &wasm_blob).await {
-                Ok((pre_balance, pre_reserved, post_uninstall, transferred, topped_up)) => {
-                    if let Err(e) = mark_harvested(
-                        pool.as_ref(),
-                        &canister_id,
-                        pre_balance,
-                        pre_reserved,
-                        post_uninstall,
-                        transferred,
-                        topped_up,
-                    )
-                    .await
-                    {
-                        println!(
-                            "  warning: mark_harvested failed for {}: {}",
-                            canister_id, e
-                        );
-                    }
-
+                Ok((_pre_balance, _pre_reserved, _post_uninstall, transferred, topped_up)) => {
                     {
                         let mut g = stats.lock().await;
                         g.success += 1;
@@ -1739,7 +1559,6 @@ async fn harvest_failed_with_parent_recovery() -> Result<()> {
                 }
                 Err(e) => {
                     let reason = e.to_string();
-                    let _ = mark_harvest_failed(pool.as_ref(), &canister_id, &reason).await;
 
                     {
                         let mut g = stats.lock().await;
@@ -1757,7 +1576,6 @@ async fn harvest_failed_with_parent_recovery() -> Result<()> {
                 po,
                 canister_id,
                 &wasm_blob,
-                pool.as_ref(),
                 &root,
             )
             .await
@@ -1777,7 +1595,6 @@ async fn harvest_failed_with_parent_recovery() -> Result<()> {
                 }
                 Err(e) => {
                     let reason = e.to_string();
-                    let _ = mark_harvest_failed(pool.as_ref(), &canister_id, &reason).await;
 
                     {
                         let mut g = stats.lock().await;
@@ -1795,7 +1612,6 @@ async fn harvest_failed_with_parent_recovery() -> Result<()> {
 
     let final_stats = stats.lock().await;
 
-    let (final_done, final_failed) = harvest_counts(&pool).await?;
     println!("\n========== Parent Recovery Harvest Summary ==========");
     println!("  Successfully recovered: {}", final_stats.success);
     println!("  Still failing: {}", final_stats.failed);
@@ -1803,8 +1619,6 @@ async fn harvest_failed_with_parent_recovery() -> Result<()> {
         "  Total transferred in this run: {} TC",
         format_cycles(final_stats.transferred)
     );
-    println!("  Total harvested (all time): {}", final_done);
-    println!("  Total failures recorded (all time): {}", final_failed);
 
     print_po_cycle_balance("after parent recovery harvest", &root);
 
@@ -1887,7 +1701,6 @@ async fn harvest_with_parent_recovery(
     po: Principal,
     child_id: Principal,
     wasm_blob: &[u8],
-    pool: &sqlx::SqlitePool,
     root: &std::path::Path,
 ) -> Result<u128> {
     let mut visited = HashSet::new();
@@ -1898,7 +1711,6 @@ async fn harvest_with_parent_recovery(
         po,
         child_id,
         wasm_blob,
-        pool,
         root,
         0,
         &mut visited,
@@ -1912,7 +1724,6 @@ async fn harvest_with_parent_recovery_inner(
     po: Principal,
     child_id: Principal,
     wasm_blob: &[u8],
-    pool: &sqlx::SqlitePool,
     root: &std::path::Path,
     depth: usize,
     visited: &mut HashSet<Principal>,

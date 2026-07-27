@@ -3,8 +3,8 @@
 # Edit the Operations section below to target whichever operation is currently running.
 #
 # NOTE: The old subnet orchestrator / user_index polling logic was removed when
-# user_index was decommissioned. User data is now handled by user_info_service,
-# user_post_service, and rate_limits canisters.
+# user_index was decommissioned. User data is now handled by user_info_service
+# and user_post_service canisters.
 #
 # Usage:
 #   bash scripts/monitor-long-running-task.sh

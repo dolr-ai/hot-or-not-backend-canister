@@ -48,7 +48,6 @@ struct AuthorizedSubnetWorks {
 pub struct ServiceCanisters {
     pub user_info_service_canister_id: Principal,
     pub user_post_service_canister_id: Principal,
-    pub rate_limits_canister_id: Principal,
 }
 
 pub fn get_new_pocket_ic_env_with_service_canisters_provisioned() -> (PocketIc, ServiceCanisters) {
@@ -76,24 +75,11 @@ pub fn get_new_pocket_ic_env_with_service_canisters_provisioned() -> (PocketIc, 
         }),
     );
 
-    let rate_limits_canister = pocket_ic.create_canister_with_settings(
-        Some(super_admin),
-        Some(CanisterSettings {
-            controllers: Some(vec![super_admin]),
-            ..Default::default()
-        }),
-    );
-
     pocket_ic.add_cycles(user_service_canister, 10_000_000_000_000_000);
     pocket_ic.add_cycles(user_post_service_canister, 10_000_000_000_000_000);
-    pocket_ic.add_cycles(rate_limits_canister, 10_000_000_000_000_000);
 
     let user_info_service_canister_wasm = include_bytes!(
         "../../../../../../target/wasm32-unknown-unknown/release/user_info_service.wasm.gz"
-    );
-
-    let rate_limits_canister_wasm = include_bytes!(
-        "../../../../../../target/wasm32-unknown-unknown/release/rate_limits.wasm.gz"
     );
 
     let user_post_service_canister_wasm = include_bytes!(
@@ -122,28 +108,9 @@ pub fn get_new_pocket_ic_env_with_service_canisters_provisioned() -> (PocketIc, 
         Some(super_admin),
     );
 
-    pocket_ic.install_canister(
-        rate_limits_canister,
-        rate_limits_canister_wasm.to_vec(),
-        {
-            #[derive(candid::CandidType)]
-            struct RateLimitsInitArgs {
-                version: String,
-                user_info_canister: Principal,
-            }
-            candid::encode_one(RateLimitsInitArgs {
-                version: "v1.0.0".into(),
-                user_info_canister: user_service_canister,
-            })
-        }
-        .unwrap(),
-        Some(super_admin),
-    );
-
     let service_canisters = ServiceCanisters {
         user_info_service_canister_id: user_service_canister,
         user_post_service_canister_id: user_post_service_canister,
-        rate_limits_canister_id: rate_limits_canister,
     };
 
     (pocket_ic, service_canisters)

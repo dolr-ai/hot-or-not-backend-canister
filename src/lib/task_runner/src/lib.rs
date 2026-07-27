@@ -1,5 +1,5 @@
 pub mod agent;
-pub mod db;
+pub mod canister_list;
 pub mod sns_types;
 
 #[cfg(test)]

@@ -59,17 +59,6 @@
       "optimize": "size",
       "package": "platform_orchestrator",
       "type": "rust"
-    },
-    "rate_limits": {
-      "candid": "./src/canister/rate_limits/can.did",
-      "declaration": {
-        "node_compatibility": true,
-        "output": "./export/declarations/rate_limits"
-      },
-      "gzip": true,
-      "optimize": "size",
-      "package": "rate_limits",
-      "type": "rust"
     }
   },
   "version": 1

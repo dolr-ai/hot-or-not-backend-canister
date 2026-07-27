@@ -7,7 +7,6 @@ edition = "2021"
 candid = { workspace = true, features = ["value"] }
 ic-agent = { workspace = true, features = ["pem"] }
 serde = { version = "1", features = ["derive"] }
-sqlx = { version = "0.9", features = ["sqlite", "runtime-tokio", "macros"] }
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"
 sha2 = "0.10"

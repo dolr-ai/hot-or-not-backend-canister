@@ -8,7 +8,6 @@ members = [
     "src/lib/integration_tests",
     "src/lib/shared_utils",
     "src/lib/test_utils",
-    "src/canister/rate_limits",
     "src/lib/task_runner",
 ]
 

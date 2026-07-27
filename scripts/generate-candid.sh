@@ -16,7 +16,6 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ALL_CANISTERS=(
   user_post_service
   user_info_service
-  rate_limits
 )
 
 if [ $# -gt 0 ]; then
