@@ -23,4 +23,4 @@ icp_ledger.wasm.gz
 pocket-ic
 .idea
 scripts/proposals/
-**/*.pem
+*.pem
