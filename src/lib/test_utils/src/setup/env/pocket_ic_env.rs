@@ -12,9 +12,7 @@ use shared_utils::{
         user_info_service::args::UserInfoServiceInitArgs,
         user_post_service::types::args::UserPostServiceInitArgs,
     },
-    common::types::{
-        known_principal::{KnownPrincipalMap, KnownPrincipalType},
-    },
+    common::types::known_principal::{KnownPrincipalMap, KnownPrincipalType},
     constant::{GLOBAL_SUPER_ADMIN_USER_ID_V1, NNS_CYCLE_MINTING_CANISTER, NNS_LEDGER_CANISTER_ID},
 };
 
