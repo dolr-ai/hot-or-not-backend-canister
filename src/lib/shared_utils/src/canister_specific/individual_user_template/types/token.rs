@@ -138,14 +138,23 @@ mod test {
     mod test_handle_token_event {
         use std::time::SystemTime;
 
-        use test_utils::setup::test_constants::{
-            get_mock_user_alice_canister_id, get_mock_user_alice_principal_id,
-            get_mock_user_bob_principal_id,
-        };
+        use ic_cdk::api::management_canister::provisional::CanisterId;
 
         use crate::canister_specific::individual_user_template::types::hot_or_not::BetDirection;
 
         use super::*;
+
+        fn get_mock_user_alice_canister_id() -> Principal {
+            CanisterId::from_slice(&8_usize.to_ne_bytes())
+        }
+
+        fn get_mock_user_alice_principal_id() -> Principal {
+            Principal::self_authenticating([1])
+        }
+
+        fn get_mock_user_bob_principal_id() -> Principal {
+            Principal::self_authenticating([2])
+        }
 
         #[test]
         fn test_handle_token_event_truncate_overflowing_entries() {

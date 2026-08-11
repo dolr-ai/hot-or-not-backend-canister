@@ -79,12 +79,21 @@ pub fn get_roles_for_principal_id_v2(
 #[cfg(test)]
 mod test {
     use std::collections::HashMap;
-    use test_utils::setup::test_constants::{
-        get_global_super_admin_principal_id, get_mock_user_alice_principal_id,
-        get_mock_user_bob_principal_id,
-    };
 
     use super::*;
+    use crate::constant::GLOBAL_SUPER_ADMIN_USER_ID_V1;
+
+    fn get_global_super_admin_principal_id() -> Principal {
+        Principal::from_text(GLOBAL_SUPER_ADMIN_USER_ID_V1).unwrap()
+    }
+
+    fn get_mock_user_alice_principal_id() -> Principal {
+        Principal::self_authenticating([1])
+    }
+
+    fn get_mock_user_bob_principal_id() -> Principal {
+        Principal::self_authenticating([2])
+    }
 
     #[test]
     fn test_does_principal_have_role_v2() {
