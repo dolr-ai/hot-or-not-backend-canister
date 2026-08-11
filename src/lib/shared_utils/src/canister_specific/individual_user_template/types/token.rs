@@ -138,6 +138,7 @@ mod test {
     mod test_handle_token_event {
         use std::time::SystemTime;
 
+        use candid::Principal;
         use ic_cdk::api::management_canister::provisional::CanisterId;
 
         use crate::canister_specific::individual_user_template::types::hot_or_not::BetDirection;

@@ -81,6 +81,7 @@ mod test {
     use std::collections::HashMap;
 
     use super::*;
+    use candid::Principal;
     use crate::constant::GLOBAL_SUPER_ADMIN_USER_ID_V1;
 
     fn get_global_super_admin_principal_id() -> Principal {
