@@ -4,7 +4,7 @@
 #
 # Usage:
 #   bash scripts/generate-candid.sh                  # regenerate all canisters
-#   bash scripts/generate-candid.sh user_info_service # regenerate one canister
+#   bash scripts/generate-candid.sh canister_to_harvest # regenerate one canister
 #
 # NOTE: This script is also invoked directly by Rust integration tests
 # (task_runner tests) via Command::new("bash").args(["scripts/generate-candid.sh", ...]).
@@ -14,8 +14,6 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 ALL_CANISTERS=(
-  user_post_service
-  user_info_service
   canister_to_harvest
 )
 

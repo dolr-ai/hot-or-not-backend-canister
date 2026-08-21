@@ -1,5 +1,4 @@
-use std::collections::{HashMap, HashSet};
-
+use crate::setup::test_constants::v1::CANISTER_INITIAL_CYCLES_FOR_SPAWNING_CANISTERS;
 use candid::{utils::ArgumentEncoder, CandidType, Deserialize, Principal};
 use ic_cdk::api::management_canister::main::CanisterId;
 use ic_ledger_types::{AccountIdentifier, BlockIndex, Tokens, DEFAULT_SUBACCOUNT};
@@ -7,18 +6,11 @@ use pocket_ic::{
     management_canister::CanisterSettings, PocketIc, PocketIcBuilder, UserError, WasmResult,
 };
 use shared_utils::{
-    canister_specific::{
-        platform_orchestrator::types::args::PlatformOrchestratorInitArgs,
-        user_info_service::args::UserInfoServiceInitArgs,
-        user_post_service::types::args::UserPostServiceInitArgs,
-    },
+    canister_specific::platform_orchestrator::types::args::PlatformOrchestratorInitArgs,
     common::types::known_principal::{KnownPrincipalMap, KnownPrincipalType},
     constant::{GLOBAL_SUPER_ADMIN_USER_ID_V1, NNS_CYCLE_MINTING_CANISTER, NNS_LEDGER_CANISTER_ID},
 };
-
-use crate::setup::test_constants::{
-    get_global_super_admin_principal_id, v1::CANISTER_INITIAL_CYCLES_FOR_SPAWNING_CANISTERS,
-};
+use std::collections::{HashMap, HashSet};
 
 #[derive(CandidType)]
 struct NnsLedgerCanisterInitPayload {
@@ -40,78 +32,6 @@ struct CyclesMintingCanisterInitPayload {
 struct AuthorizedSubnetWorks {
     who: Option<Principal>,
     subnets: Vec<Principal>,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct ServiceCanisters {
-    pub user_info_service_canister_id: Principal,
-    pub user_post_service_canister_id: Principal,
-}
-
-pub fn get_new_pocket_ic_env_with_service_canisters_provisioned() -> (PocketIc, ServiceCanisters) {
-    let pocket_ic = PocketIcBuilder::new()
-        .with_nns_subnet()
-        .with_application_subnet()
-        .with_system_subnet()
-        .build();
-
-    let super_admin = get_global_super_admin_principal_id();
-
-    let user_service_canister = pocket_ic.create_canister_with_settings(
-        Some(super_admin),
-        Some(CanisterSettings {
-            controllers: Some(vec![super_admin]),
-            ..Default::default()
-        }),
-    );
-
-    let user_post_service_canister = pocket_ic.create_canister_with_settings(
-        Some(super_admin),
-        Some(CanisterSettings {
-            controllers: Some(vec![super_admin]),
-            ..Default::default()
-        }),
-    );
-
-    pocket_ic.add_cycles(user_service_canister, 10_000_000_000_000_000);
-    pocket_ic.add_cycles(user_post_service_canister, 10_000_000_000_000_000);
-
-    let user_info_service_canister_wasm = include_bytes!(
-        "../../../../../../target/wasm32-unknown-unknown/release/user_info_service.wasm.gz"
-    );
-
-    let user_post_service_canister_wasm = include_bytes!(
-        "../../../../../../target/wasm32-unknown-unknown/release/user_post_service.wasm.gz"
-    );
-
-    let user_info_service_canister_init_args = UserInfoServiceInitArgs {
-        version: "v1.0.0".into(),
-    };
-
-    let user_post_service_canister_init_args = UserPostServiceInitArgs {
-        version: "v1.0.0".into(),
-    };
-
-    pocket_ic.install_canister(
-        user_service_canister,
-        user_info_service_canister_wasm.to_vec(),
-        candid::encode_one(user_info_service_canister_init_args).unwrap(),
-        Some(super_admin),
-    );
-
-    pocket_ic.install_canister(
-        user_post_service_canister,
-        user_post_service_canister_wasm.to_vec(),
-        candid::encode_one(user_post_service_canister_init_args).unwrap(),
-        Some(super_admin),
-    );
-
-    let service_canisters = ServiceCanisters {
-        user_info_service_canister_id: user_service_canister,
-        user_post_service_canister_id: user_post_service_canister,
-    };
-
-    (pocket_ic, service_canisters)
 }
 
 pub fn get_new_pocket_ic_env() -> (PocketIc, KnownPrincipalMap) {

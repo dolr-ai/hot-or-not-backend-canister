@@ -20,7 +20,6 @@ use crate::{
         ExecuteGenericNervousSystemFunction, FunctionType, GenericNervousSystemFunction,
         ManageNeuron, NervousSystemFunction, Proposal, CHANGE_CANISTER_FUNCTION_ID,
         NEURON_SUBACCOUNT, PLATFORM_ORCHESTRATOR_ID, SNS_GOVERNANCE_ID, SNS_ROOT_ID,
-        USER_INFO_SERVICE_ID,
     },
 };
 
@@ -78,7 +77,7 @@ async fn submit_proposal(action: Action) -> u64 {
 #[ignore = "submits a live SNS proposal — vote in before running step 2"]
 async fn register_install_code_function() {
     let sns_root = Principal::from_text(SNS_ROOT_ID).unwrap();
-    let validator = Principal::from_text(USER_INFO_SERVICE_ID).unwrap();
+    let validator = Principal::from_text(PLATFORM_ORCHESTRATOR_ID).unwrap();
 
     let id = submit_proposal(Action::AddGenericNervousSystemFunction(
         NervousSystemFunction {

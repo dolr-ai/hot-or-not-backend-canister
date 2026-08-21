@@ -1,9 +1,0 @@
-pub mod test_accept_new_user_registration_for_user_info_service;
-pub mod test_check_session_type_for_user_info_service;
-pub mod test_convert_to_bot_account;
-pub mod test_delete_user_for_user_info_service;
-pub mod test_follower_following_functionality;
-pub mod test_get_users_profile_details;
-pub mod test_registeration_of_new_users;
-pub mod test_subscription_plan_functionality;
-pub mod test_update_session_type_for_user_info_service;

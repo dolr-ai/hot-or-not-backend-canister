@@ -12,7 +12,7 @@
 ///      (explicit post-Ok check, no polling loop).
 ///   3. Uninstall wasm (if installed) → releases reserved cycles to main balance
 ///   4. Check post-uninstall balance; top up with 0.5T if < 1.0 TC
-///   5. Install individual_user_template wasm
+///   5. Install canister_to_harvest wasm
 ///   6. Call return_cycle_balance_to_platform_orchestrator → sends everything back
 ///   7. Final uninstall
 ///   8. Set controllers to [PO] only via management canister
@@ -62,19 +62,6 @@ const PRE_HARVEST_DEPOSIT: u128 = 100_000_000_000; // 100B cycles (~0.1 TC)
 /// Built by `cargo build --target wasm32-unknown-unknown --release` (via generate-candid.sh).
 const HARVEST_WASM_PATH: &str =
     "target/wasm32-unknown-unknown/release/canister_to_harvest.wasm";
-
-/// Canisters that must NEVER be harvested — active production services.
-const HARVEST_BLOCKLIST: &[&str] = &[
-    "ivkka-7qaaa-aaaas-qbg3q-cai",  // user_info_service
-    "gxhc3-pqaaa-aaaas-qbh3q-cai",  // user_post_service
-];
-
-/// Check if a canister is on the harvest blocklist.
-fn is_harvest_blocked(canister_id: Principal) -> bool {
-    HARVEST_BLOCKLIST
-        .iter()
-        .any(|id| Principal::from_text(id).map(|p| p == canister_id).unwrap_or(false))
-}
 
 /// Check if a principal is a user principal (long string) vs a canister principal (short string).
 /// User principals cannot be harvested — they're not canisters.
@@ -570,7 +557,7 @@ async fn harvest_canister(
         .call_and_wait()
         .await;
 
-    // Step 5: Install individual_user_template wasm.
+    // Step 5: Install canister_to_harvest wasm.
     // Always use Reinstall mode + unconditional pre-uninstall (see above) so this is
     // robust against IC0514 "canister not empty" and partial prior runs.
     // This matches the behavior dfx uses for force-restore/install scenarios.
@@ -663,7 +650,7 @@ async fn harvest_canister(
 
     // Step 6: Transfer cycles to PO, passing an explicit reserve (cycles to leave behind).
     // Start at 50B (batch runs showed 30B consistently insufficient after a fresh
-    // individual_user_template install). Step +10B on "Couldn't send message" / out-of-cycles
+    // canister_to_harvest install). Step +10B on "Couldn't send message" / out-of-cycles
     // up to 100B max. If it still fails at 100B, accept 0 transferred and proceed to
     // final uninstall + PO-only lockdown (the transfer is best-effort).
     let mut cycles_transferred: u128 = 0;
@@ -906,12 +893,6 @@ async fn harvest_single_canister() -> Result<()> {
         pending[0]
     };
     println!("Harvesting: {}", canister_id);
-
-    // Hard blocklist: never harvest active production services
-    if is_harvest_blocked(canister_id) {
-        println!("  \u{26a0} BLOCKED: {} is on the harvest blocklist, skipping.", canister_id);
-        return Ok(());
-    }
 
     // Build canister_to_harvest wasm and auto-regenerate its Candid interface
     // (so the .did is always produced from the exact compiled export_candid!() in this build).

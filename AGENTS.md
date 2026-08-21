@@ -97,7 +97,7 @@ Pre-deployment checklist:
 - Run the local PO setup test (`setup_local_po_and_validate_harvest_methods`) and confirm it passes with the current code. This is the local gate.
 - Ensure `actions_identity.pem` in the repo root contains the PEM for the principal that is a controller of the live PO (never commit this file).
 - For PO itself: use the direct `dfx canister install --mode=upgrade` path (exposed via the `upgrade_po_directly` ignored test).
-- For user_index / individual_user_template fleets: the direct upgrade tests still build them and then drive the PO's `upload_wasms` + trigger methods (the PO remains the vehicle for subnet-wide fleet upgrades).
+- The old user_index / individual_user_template fleet upgrade paths have been removed. The PO is the only canister we upgrade directly.
 
 **DFX mainnet plaintext identity warning suppression:**
 
@@ -120,13 +120,7 @@ Deployment / upgrade sequence (PO and fleets):
    ```
    This does `dfx build platform_orchestrator --network=ic` followed by `dfx canister install platform_orchestrator --mode=upgrade --network ic ...` using the actions identity (which is a controller).
 
-3. For PO + UI (user_index + individual_user_template) in one go:
-   ```sh
-   cargo test -p task_runner -- --ignored upgrade_po_and_ui_directly --nocapture
-   ```
-   Or `upgrade_all_directly` for the full scope.
-
-4. The test will print module hashes before/after and the new version. Confirm via `dfx canister info platform_orchestrator --network ic` (module hash changed) and/or calling `get_version` on the live PO.
+3. The test will print module hashes before/after and the new version. Confirm via `dfx canister info platform_orchestrator --network ic` (module hash changed) and/or calling `get_version` on the live PO.
 
 Cycle reclaim / harvest (after a successful PO upgrade that includes the harvest endpoints):
 

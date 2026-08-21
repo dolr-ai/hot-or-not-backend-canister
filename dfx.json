@@ -5,50 +5,6 @@
       "candid": "./src/lib/integration_tests/tests/pump_n_dump/mock_ledger/ledger.did",
       "wasm": "./src/lib/integration_tests/tests/pump_n_dump/mock_ledger/ic-icrc1-ledger.wasm.gz"
     },
-    "user_post_service": {
-      "candid": "./src/canister/user_post_service/can.did",
-      "declaration": {
-        "node_compatibility": true,
-        "output": "./export/declarations/user_post_service"
-      },
-      "gzip": true,
-      "optimize": "size",
-      "package": "user_post_service",
-      "type": "rust"
-    },
-    "configuration": {
-      "candid": "./src/canister/configuration/can.did",
-      "declarations": {
-        "node_compatibility": true,
-        "output": "./export/declarations/configuration"
-      },
-      "gzip": true,
-      "optimize": "size",
-      "package": "configuration",
-      "type": "rust"
-    },
-    "data_backup": {
-      "candid": "./src/canister/data_backup/can.did",
-      "declarations": {
-        "node_compatibility": true,
-        "output": "./export/declarations/data_backup"
-      },
-      "gzip": true,
-      "optimize": "size",
-      "package": "data_backup",
-      "type": "rust"
-    },
-    "user_info_service": {
-      "candid": "./src/canister/user_info_service/can.did",
-      "declarations": {
-        "node_compatibility": true,
-        "output": "./export/declarations/user_info_service"
-      },
-      "gzip": true,
-      "optimize": "size",
-      "package": "user_info_service",
-      "type": "rust"
-    },
     "platform_orchestrator": {
       "candid": "./src/canister/platform_orchestrator/can.did",
       "declaration": {

@@ -3716,35 +3716,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "user_info_service"
-version = "0.1.0"
-dependencies = [
- "candid",
- "ciborium",
- "ic-cdk 0.15.1",
- "ic-cdk-macros 0.16.0",
- "ic-stable-structures",
- "serde",
- "shared_utils",
- "test_utils",
-]
-
-[[package]]
-name = "user_post_service"
-version = "0.1.0"
-dependencies = [
- "candid",
- "ciborium",
- "ic-cdk 0.15.1",
- "ic-cdk-macros 0.16.0",
- "ic-cdk-timers",
- "ic-stable-structures",
- "serde",
- "shared_utils",
- "test_utils",
-]
-
-[[package]]
 name = "uuid"
 version = "1.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

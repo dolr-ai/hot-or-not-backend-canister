@@ -101,8 +101,6 @@ pub struct ChangeCanisterRequest {
 pub const CHANGE_CANISTER_FUNCTION_ID: u64 = 5001;
 /// SNS root canister — controls platform_orchestrator, has change_canister().
 pub const SNS_ROOT_ID: &str = "67bll-riaaa-aaaaq-aaauq-cai";
-/// user_info_service — controlled by actions identity, hosts validate_install_code.
-pub const USER_INFO_SERVICE_ID: &str = "ivkka-7qaaa-aaaas-qbg3q-cai";
 /// The actions identity principal (neuron controller + co-controller after deregister).
 pub const ACTIONS_PRINCIPAL: &str =
     "zg7n3-345by-nqf6o-3moz4-iwxql-l6gko-jqdz2-56juu-ja332-unymr-fqe";

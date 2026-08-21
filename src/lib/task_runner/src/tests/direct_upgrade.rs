@@ -1,3 +1,6 @@
+use crate::agent::workspace_root;
+use anyhow::{Context, Result};
+use sha2::{Digest, Sha256};
 /// Direct canister upgrades via controller access (no SNS proposals).
 ///
 /// Since actions_identity is a direct controller of platform_orchestrator,
@@ -7,60 +10,18 @@
 /// NOTE (post-PO-cleanup): The platform_orchestrator was intentionally reduced
 /// to a minimal surface for cycle harvesting. The old PO methods `upload_wasms`,
 /// `upgrade_canisters_in_network`, and the wasm storage/provisioning logic were
-/// removed. Calls to `po.upload_wasms(...)` (as seen in the old `scripts/deploy-local.sh`
-/// and in the raw `.update` sites below) now produce:
+/// removed. Calls to `po.upload_wasms(...)` now produce:
 ///   "Canister has no update method 'upload_wasms'".
 ///
 /// Current local PO validation and setup is done via the cargo test
-/// `setup_local_po_and_validate_harvest_methods` (see local_po_setup.rs).
+/// `setup_local_po_and_validate_harvest_methods` (see local_setup.rs).
 /// For direct PO upgrades on a controller identity: use
 ///   `dfx canister install platform_orchestrator --mode=upgrade --network ic`
 /// (the actions_identity.pem principal must be a controller of the PO).
 ///
-/// The code below is retained for reference / future adaptation of fleet-wide
-/// upgrade flows (individual templates are now driven from other entry points
-/// after the PO simplification). It will fail against current PO
-/// until the upload/upgrade paths are reimplemented outside PO or the tests
-/// are updated to the post-cleanup architecture.
-///
 /// Run with:
 ///   cargo test -p task_runner -- --ignored upgrade_po_directly --nocapture
-///   cargo test -p task_runner -- --ignored upgrade_all_directly --nocapture
-///   cargo test -p task_runner -- --ignored deploy_user_info_service_directly --nocapture
 use std::process::Command;
-
-use anyhow::{Context, Result};
-use candid::{Encode, Principal};
-use sha2::{Digest, Sha256};
-
-use crate::{
-    agent::{agent_from_pem, workspace_root},
-    sns_types::PLATFORM_ORCHESTRATOR_ID,
-};
-
-// ── Helper types for PO API calls ─────────────────────────────────────────────
-
-#[derive(candid::CandidType, candid::Deserialize)]
-pub enum WasmType {
-    IndividualUserWasm,
-    PostCacheWasm,
-}
-
-#[derive(candid::CandidType, candid::Deserialize)]
-pub struct UpgradeCanisterArg {
-    pub version: String,
-    pub canister: WasmType,
-    pub wasm_blob: Vec<u8>,
-}
-
-/// Which canisters to include in the upgrade.
-#[derive(Clone, Copy)]
-enum ReleaseScope {
-    /// platform_orchestrator only
-    PoOnly,
-    /// platform_orchestrator + individual_user_template fleet
-    All,
-}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -154,26 +115,16 @@ fn upgrade_canister_via_dfx(
 
 // ── Core upgrade logic ────────────────────────────────────────────────────────
 
-/// Execute a direct fleet upgrade with the given scope.
-async fn upgrade_fleet(scope: ReleaseScope) -> Result<()> {
+/// Execute a direct platform_orchestrator upgrade.
+async fn upgrade_po() -> Result<()> {
     let root = workspace_root();
-    let pem_path = root.join("actions_identity.pem");
+    let _pem_path = root.join("actions_identity.pem");
 
-    // ── Step 1: Build canisters ────────────────────────────────────────────────
+    // ── Step 1: Build canister ─────────────────────────────────────────────────
     let po_wasm_path = build_canister("platform_orchestrator")?;
 
-    let (iu_wasm_path,) = match scope {
-        ReleaseScope::PoOnly => (None,),
-        ReleaseScope::All => (Some(build_canister("individual_user_template")?),),
-    };
-
-    // Regenerate Candid interfaces.
-    match scope {
-        ReleaseScope::PoOnly => regenerate_candid(&["platform_orchestrator"])?,
-        ReleaseScope::All => {
-            regenerate_candid(&["platform_orchestrator", "individual_user_template"])?
-        }
-    }
+    // Regenerate Candid interface.
+    regenerate_candid(&["platform_orchestrator"])?;
 
     let version = timestamp_version();
     println!("\nVersion: {version}");
@@ -185,48 +136,7 @@ async fn upgrade_fleet(scope: ReleaseScope) -> Result<()> {
     upgrade_canister_via_dfx("platform_orchestrator", &po_wasm_path, &version)?;
     println!("✓ platform_orchestrator upgraded");
 
-    // ── Step 3: Upgrade subnet canisters via PO API (ic-agent works fine for regular canisters) ──
-    let agent = agent_from_pem(&pem_path).await?;
-    let po = Principal::from_text(PLATFORM_ORCHESTRATOR_ID)?;
-
-    // ── Step 4: Upgrade individual_user_template fleet (if in scope) ───────────
-    if let Some(iu_wasm_path) = iu_wasm_path {
-        let iu_wasm = std::fs::read(&iu_wasm_path)?;
-
-        println!("\n==> Uploading individual_user_template wasm to platform_orchestrator...");
-        let upload_arg = Encode!(&WasmType::IndividualUserWasm, &iu_wasm)?;
-
-        agent
-            .update(&po, "upload_wasms")
-            .with_arg(upload_arg)
-            .call_and_wait()
-            .await?;
-
-        println!("✓ individual_user_template wasm uploaded");
-
-        // upgrade_canisters_in_network : (UpgradeCanisterArg) -> (Result_1)
-        println!("==> Triggering individual_user_template fleet upgrade...");
-        let fleet_arg = Encode!(&UpgradeCanisterArg {
-            version: version.clone(),
-            canister: WasmType::IndividualUserWasm,
-            wasm_blob: iu_wasm,
-        })?;
-
-        agent
-            .update(&po, "upgrade_canisters_in_network")
-            .with_arg(fleet_arg)
-            .call_and_wait()
-            .await?;
-
-        println!("✓ individual_user_template fleet upgrade initiated");
-    }
-
-    let scope_label = match scope {
-        ReleaseScope::PoOnly => "platform_orchestrator",
-        ReleaseScope::All => "all canisters",
-    };
-
-    println!("\n✓ {scope_label} upgraded to version {version}");
+    println!("\n✓ platform_orchestrator upgraded to version {version}");
     Ok(())
 }
 
@@ -236,46 +146,5 @@ async fn upgrade_fleet(scope: ReleaseScope) -> Result<()> {
 #[tokio::test]
 #[ignore = "upgrades platform_orchestrator on mainnet — run explicitly"]
 async fn upgrade_po_directly() -> Result<()> {
-    upgrade_fleet(ReleaseScope::PoOnly).await
-}
-
-/// Upgrade the full fleet: platform_orchestrator, individual_user_template.
-#[tokio::test]
-#[ignore = "upgrades all canisters on mainnet — run explicitly"]
-async fn upgrade_all_directly() -> Result<()> {
-    upgrade_fleet(ReleaseScope::All).await
-}
-
-// ── Deploy / upgrade user_info_service directly (controller identity) ─────
-
-/// Build + deploy (or upgrade) `user_info_service` directly to mainnet using the
-/// actions identity (must be a controller of the live canister).
-///
-/// This follows the same pattern as the fleet upgrades:
-/// - regenerates candid (scripts/generate-candid.sh)
-/// - builds via `dfx build --network=ic`
-/// - installs via `dfx canister install --mode=upgrade --network=ic`
-///   (passing the versioned init/upgrade arg that user_info_service expects)
-///
-/// Run with:
-///   cargo test -p task_runner -- --ignored deploy_user_info_service_directly --nocapture
-#[tokio::test]
-#[ignore = "deploys user_info_service to mainnet — run explicitly"]
-async fn deploy_user_info_service_directly() -> Result<()> {
-    println!("==> Regenerating Candid for user_info_service ...");
-    regenerate_candid(&["user_info_service"])?;
-
-    println!("==> Building user_info_service for mainnet ...");
-    let wasm_path = build_canister("user_info_service")?;
-
-    let version = timestamp_version();
-    println!("\nVersion: {version}");
-
-    println!("\n==> Deploying user_info_service to mainnet ...");
-    // For an existing canister this is an upgrade; for a brand-new id it would be install.
-    // user_info_service accepts (record { version : text }) on both init and post_upgrade.
-    upgrade_canister_via_dfx("user_info_service", &wasm_path, &version)?;
-
-    println!("\n✓ user_info_service deployed (version {version})");
-    Ok(())
+    upgrade_po().await
 }
