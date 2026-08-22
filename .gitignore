@@ -9,7 +9,6 @@ ic-repl
 ic-repl-linux64
 .direnv/
 **/*.pem
-sns-testing/**
 msg.json
 ic-test-state-machine
 argument

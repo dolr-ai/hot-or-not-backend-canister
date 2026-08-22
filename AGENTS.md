@@ -11,7 +11,7 @@ This file is not a changelog. It should describe the active way this repository 
 - This repo contains backend canisters for the HotOrNot/yral Internet Computer project.
 - The root uses `dfx` and canister-based Rust crates under `src/canister/`.
 - Local development and CI are driven from repository scripts, not ad hoc commands.
-- `canister_ids.json` and `sns_canister_ids.json` are authoritative canister ID manifests for this repo.
+- `canister_ids.json` is the authoritative canister ID manifest for this repo.
 
 ## Canonical Workflows (task_runner)
 
@@ -24,10 +24,8 @@ cargo test -p task_runner -- --ignored <test-name> --nocapture
 
 Key entry points (see the `#[ignore]` tests and their module docs for exact commands and env vars):
 - `setup_local_po_and_validate_harvest_methods` — clean local dfx replica + post-cleanup PO deploy + controller wiring + validation that the three harvest methods (`get_version`, `get_controllers_and_cycle_balance`, `add_our_identity_as_controller`) are callable. This is the required local gate and replaces the old `scripts/deploy-local.sh`.
-- `upgrade_po_directly` (and `upgrade_po_and_ui_directly`, `upgrade_all_directly`) — direct controller upgrade of platform_orchestrator (and optionally the fleets) via `dfx canister install --mode=upgrade`. This is the current path because `actions_identity` is a direct controller of the live PO. No SNS proposal is submitted for PO itself.
+- `upgrade_po_directly` (and `upgrade_po_and_ui_directly`, `upgrade_all_directly`) — direct controller upgrade of platform_orchestrator (and optionally the fleets) via `dfx canister install --mode=upgrade`. This is the current path because `actions_identity` is a direct controller of the live PO.
 - `harvest_single_canister` (supports `HARVEST_CANISTER_ID=...` to target a specific canister) — the 10-step cycle reclaim flow for a single PO-controlled canister. The canister list is read from `src/canister/platform_orchestrator/principal.csv`.
-- `deregister_po` / `reinstall_po_directly` / `reregister_po` — legacy one-time bridge (SNS deregister → direct management `install_code(Reinstall)` → SNS reregister) used to acquire direct controller rights. Do not use for routine upgrades.
-- `reinstall_po` and `reinstall_via_generic` — legacy pure-SNS paths (UpgradeSnsControlledCanister or registered generic nervous system function). Retired for PO now that we are controllers.
 
 The `task_runner` tests are the single source of truth for these operations. They are executable runbooks and co-located with the code they exercise.
 
@@ -91,7 +89,7 @@ For a complete local upgrade rehearsal (old tag → new code), the spirit of the
 
 ## Mainnet Deployment
 
-**We are direct controllers of `platform_orchestrator`. PO upgrades no longer go through SNS proposals.**
+**We are direct controllers of `platform_orchestrator`.**
 
 Pre-deployment checklist:
 - Run the local PO setup test (`setup_local_po_and_validate_harvest_methods`) and confirm it passes with the current code. This is the local gate.
@@ -103,7 +101,7 @@ Pre-deployment checklist:
 
 When the `actions_identity.pem` (plaintext storage) is the selected/imported identity and dfx targets `--network=ic`, dfx refuses with "The actions identity is not stored securely."
 
-All `Command::new("dfx")` (and the bash wrapper for candid regen) inside the task_runner mainnet tests (`direct_upgrade.rs`, `cycle_harvest.rs`, `reinstall_po.rs`, etc.) now automatically inject:
+All `Command::new("dfx")` (and the bash wrapper for candid regen) inside the task_runner mainnet tests (`direct_upgrade.rs`, `cycle_harvest.rs`, etc.) now automatically inject:
 
 ```rust
 .env("DFX_WARNING", "-mainnet_plaintext_identity")
@@ -134,10 +132,6 @@ Cycle reclaim / harvest (after a successful PO upgrade that includes the harvest
   cargo test -p task_runner -- --ignored harvest_cycles_batch --nocapture
   ```
 
-Legacy paths (do not use for routine PO work):
-- `bash scripts/release-and-submit-proposals.sh` (SNS proposal submission for PO) — retired.
-- The 3-step deregister/reinstall/reregister or pure SNS reinstall tests — were used to acquire controller status; now historical.
-
 After any mainnet PO change, re-run the singular-canister reclaim for any previously failing canister (with the `HARVEST_CANISTER_ID` override) and confirm it passes before proceeding with other work.
 5. On passing, `platform_orchestrator` distributes and installs the new wasms fleet-wide.
 
@@ -167,12 +161,12 @@ Update `AGENTS.md` whenever any of the following change:
 
 - The canonical workflow moves (e.g., from a bash script in `scripts/` to an ignored `cargo test` in `task_runner`, or vice versa).
 - A task_runner ignored test (local_po_setup, direct_upgrade, cycle_harvest, etc.) changes name, behavior, or becomes the new preferred entry point.
-- The controller model for platform_orchestrator changes (SNS-governed vs. direct controller) — this affects which upgrade path is used.
+- The controller model for platform_orchestrator changes — this affects which upgrade path is used.
 - The repository adds or removes a major canister or canister manifest file.
 - The local reproducibility workflow or DB safety contract changes.
 - A new high-level engineering convention appears that future agents must know (e.g., "all PO lifecycle lives in task_runner").
 
-When updating, keep it terse and current. Remove or clearly mark obsolete patterns (e.g., retired SNS-for-PO or script-based deploy flows) immediately.
+When updating, keep it terse and current. Remove or clearly mark obsolete patterns immediately.
 
 ## Self-Update Instructions
 

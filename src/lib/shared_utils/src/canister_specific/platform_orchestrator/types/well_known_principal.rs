@@ -50,8 +50,8 @@ mod test {
         let mut platform_known_principal = PlatformOrchestratorKnownPrincipal::default();
 
         let subnet_principal = Principal::from_text("rpf7h-oyaaa-aaaag-qiu2a-cai").unwrap();
-        platform_known_principal.add_subnet_orchestrator_known_principal(subnet_principal, KnownPrincipalType::CanisterIdSnsGovernance, Principal::anonymous());
-        let retrieved_governance_canister = platform_known_principal.subnet_orchestrator_known_principals_map.get(&subnet_principal).unwrap().get(&KnownPrincipalType::CanisterIdSnsGovernance).unwrap();
+        platform_known_principal.add_subnet_orchestrator_known_principal(subnet_principal, KnownPrincipalType::CanisterIdPlatformOrchestrator, Principal::anonymous());
+        let retrieved_governance_canister = platform_known_principal.subnet_orchestrator_known_principals_map.get(&subnet_principal).unwrap().get(&KnownPrincipalType::CanisterIdPlatformOrchestrator).unwrap();
         assert_eq!(*retrieved_governance_canister, Principal::anonymous()); 
 
     }

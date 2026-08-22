@@ -31,8 +31,10 @@ use std::collections::HashSet;
 use crate::{
     agent::{agent_from_pem, workspace_root},
     canister_list::{read_canisters, PRINCIPAL_CSV},
-    sns_types::PLATFORM_ORCHESTRATOR_ID,
 };
+
+/// Platform orchestrator canister ID on IC mainnet.
+const PLATFORM_ORCHESTRATOR_ID: &str = "74zq4-iqaaa-aaaam-ab53a-cai";
 
 /// IC management canister.
 const MANAGEMENT_CANISTER: &str = "aaaaa-aa";

@@ -11,12 +11,8 @@ pub enum KnownPrincipalType {
     CanisterIdPostCache,
     CanisterIdProjectMemberIndex,
     CanisterIdRootCanister,
-    CanisterIdSNSController,
     CanisterIdTopicCacheIndex,
-    CanisterIdSnsGovernance,
     CanisterIdPlatformOrchestrator,
-    CanisterIdSnsWasm,
-    CanisterIdSnsLedger,
 }
 
 pub type KnownPrincipalMap = HashMap<KnownPrincipalType, Principal>;

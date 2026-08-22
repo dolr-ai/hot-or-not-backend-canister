@@ -1,10 +1,5 @@
 {
   "canisters": {
-    "dollr_mock_ledger": {
-      "type": "custom",
-      "candid": "./src/lib/integration_tests/tests/pump_n_dump/mock_ledger/ledger.did",
-      "wasm": "./src/lib/integration_tests/tests/pump_n_dump/mock_ledger/ic-icrc1-ledger.wasm.gz"
-    },
     "platform_orchestrator": {
       "candid": "./src/canister/platform_orchestrator/can.did",
       "declaration": {

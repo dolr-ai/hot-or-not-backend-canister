@@ -12,13 +12,6 @@ if [[ -z "$CANISTER_ID" ]]; then
   exit 1
 fi
 
-if [[ -n "${HOT_OR_NOT_SNS_PROPOSAL_SUBMISSION_IDENTITY_PRIVATE_KEY:-}" ]]; then
-  mkdir -p ~/.config/dfx/identity/admin
-  printf "%s" "$HOT_OR_NOT_SNS_PROPOSAL_SUBMISSION_IDENTITY_PRIVATE_KEY" > ~/.config/dfx/identity/admin/identity.pem
-  chmod 600 ~/.config/dfx/identity/admin/identity.pem
-  "$DFX" identity use admin
-fi
-
 case "$ACTION" in
   list_snapshots)
     "$DFX" canister --network ic snapshot list "$CANISTER_ID"

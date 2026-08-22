@@ -1,7 +1,7 @@
 use crate::agent::workspace_root;
 use anyhow::{Context, Result};
 use sha2::{Digest, Sha256};
-/// Direct canister upgrades via controller access (no SNS proposals).
+/// Direct canister upgrades via controller access.
 ///
 /// Since actions_identity is a direct controller of platform_orchestrator,
 /// we can call install_code(Upgrade) on the IC management canister — no

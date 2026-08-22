@@ -36,10 +36,6 @@ pub fn get_mock_canister_id_root() -> Principal {
     CanisterId::from_slice(&2_usize.to_ne_bytes())
 }
 
-pub fn get_mock_canister_id_sns() -> Principal {
-    CanisterId::from_slice(&3_usize.to_ne_bytes())
-}
-
 pub fn get_mock_canister_id_topic_cache() -> Principal {
     CanisterId::from_slice(&4_usize.to_ne_bytes())
 }
